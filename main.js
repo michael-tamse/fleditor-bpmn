@@ -38,6 +38,22 @@
           delete entries['create.data-object-reference'];
           delete entries['create.data-store'];
           delete entries['create.data-store-reference'];
+          // Entferne mögliche Script Task-Einträge (je nach Provider/Version)
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || v.alt || '')) + '';
+            if (/script[- ]?task/i.test(k) || /\bscript\b/i.test(title)) {
+              delete entries[k];
+            }
+          });
+          // Entferne ad-hoc sub-process aus der Palette (vorsorglich)
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || v.alt || '')) + '';
+            if (/ad[- ]?hoc/i.test(k) || /ad[- ]?hoc/i.test(title)) {
+              delete entries[k];
+            }
+          });
           return entries;
         };
       }
@@ -46,8 +62,16 @@
       const contextPadProvider = injector.get('contextPadProvider', false);
       if (contextPadProvider && typeof contextPadProvider.getContextPadEntries === 'function') {
         const originalGetCP = contextPadProvider.getContextPadEntries.bind(contextPadProvider);
+
+        function isTask(element) {
+          const t = (element && (element.type || element.businessObject && element.businessObject.$type)) || '';
+          return /Task$/.test(t);
+        }
+
         contextPadProvider.getContextPadEntries = function (element) {
           const entries = originalGetCP(element) || {};
+
+          // Entferne Data Object/Store Aktionen
           Object.keys(entries).forEach((k) => {
             if (/data-(object|store)/i.test(k)) {
               delete entries[k];
@@ -58,7 +82,70 @@
           delete entries['append.data-store-reference'];
           delete entries['create.data-object'];
           delete entries['create.data-store'];
+
+          // Für Tasks: nur "Sub-Process (collapsed)" entfernen (expanded erlauben)
+          if (isTask(element)) {
+            Object.keys(entries).forEach((k) => {
+              if (/sub[- ]?process.*collapsed/i.test(k)) {
+                delete entries[k];
+              }
+            });
+            // bekannte Varianten (nur collapsed entfernen)
+            delete entries['append.subprocess-collapsed'];
+          }
+
+          // Entferne Script Task Create/Append-Einträge generell
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || '')) + '';
+            if (/script[- ]?task/i.test(k) || /\bscript\b/i.test(title)) {
+              delete entries[k];
+            }
+          });
+          delete entries['append.script-task'];
+          delete entries['create.script-task'];
+
           return entries;
+        };
+      }
+
+      // Replace-Menü (Change Type) filtern: Sub-Process (collapsed/expanded) entfernen
+      const replaceMenuProvider = injector.get('replaceMenuProvider', false);
+      if (replaceMenuProvider && typeof replaceMenuProvider.getEntries === 'function') {
+        const originalReplaceEntries = replaceMenuProvider.getEntries.bind(replaceMenuProvider);
+        replaceMenuProvider.getEntries = function(element) {
+          const entries = originalReplaceEntries(element) || [];
+          return entries.filter((entry) => {
+            const id = String(entry.id || '');
+            const label = String(entry.label || '');
+            const targetType = entry && entry.target && entry.target.type ? String(entry.target.type) : '';
+            const isExpanded = entry && entry.target && Object.prototype.hasOwnProperty.call(entry.target, 'isExpanded')
+              ? !!entry.target.isExpanded
+              : undefined;
+
+            // Entferne nur Sub-Process (collapsed), expanded erlauben
+            if (
+              // robuste Erkennung über Zieltyp + Flag
+              (targetType === 'bpmn:SubProcess' && isExpanded === false) ||
+              // oder konservativ über ID/Label-Fallbacks
+              /sub[- ]?process.*collapsed/i.test(id) || /collapsed.*sub[- ]?process/i.test(id) ||
+              (/sub[- ]?process/i.test(label) && /collapsed/i.test(label))
+            ) {
+              return false;
+            }
+
+            // Entferne Script Task Optionen
+            if (/script[- ]?task/i.test(id) || (/script/i.test(label) && /task/i.test(label)) || /bpmn:ScriptTask$/.test(targetType)) {
+              return false;
+            }
+
+            // Entferne Ad-hoc Sub-Process Optionen
+            if (/ad[- ]?hoc/i.test(id) || /ad[- ]?hoc/i.test(label) || /bpmn:AdHocSubProcess$/.test(targetType)) {
+              return false;
+            }
+
+            return true;
+          });
         };
       }
 
@@ -114,6 +201,8 @@
     reader.onload = async (e) => {
       try {
         await modeler.importXML(e.target.result);
+        // Nach Import Modell bereinigen (ScriptTask -> Task)
+        sanitizeModel();
         modeler.get('canvas').zoom('fit-viewport', 'auto');
         setStatus(`Geladen: ${file.name}`);
       } catch (err) {
@@ -206,4 +295,78 @@
 
   // Initial laden
   createNew();
+
+  // Hilfsfunktion: Script Tasks verhindern (ersetzt zu bpmn:Task)
+  function sanitizeModel() {
+    try {
+      const elementRegistry = modeler.get('elementRegistry');
+      const bpmnReplace = modeler.get('bpmnReplace');
+      if (!elementRegistry || !bpmnReplace) return;
+      const scriptTasks = elementRegistry.filter((el) => el?.businessObject?.$type === 'bpmn:ScriptTask');
+      scriptTasks.forEach((el) => {
+        try {
+          bpmnReplace.replaceElement(el, { type: 'bpmn:Task' });
+        } catch (e) {
+          console.warn('Konnte ScriptTask nicht ersetzen:', e);
+        }
+      });
+    } catch (e) {
+      console.warn('Sanitize fehlgeschlagen:', e);
+    }
+  }
+
+  // Auch nach jedem Import sicherstellen
+  modeler.on('import.done', () => {
+    sanitizeModel();
+    // Palette nach Anpassungen neu zeichnen
+    const palette = modeler.get('palette', false);
+    if (palette && typeof palette._update === 'function') {
+      try { palette._update(); } catch (_) {}
+    }
+  });
+
+  // Fallback: DOM-basiertes Ausblenden von Replace-Menü-Einträgen,
+  // falls Provider-Overrides eine Variante nicht abdecken.
+  (function setupPopupFilter() {
+    const hideEntry = (el) => {
+      if (!el) return false;
+      const id = (el.getAttribute('data-id') || '').toLowerCase();
+      const text = (el.textContent || '').toLowerCase();
+      if (
+        id.includes('replace-with-subprocess-collapsed') ||
+        (text.includes('sub-process') && text.includes('collapsed')) ||
+        id.includes('replace-with-script-task') ||
+        (text.includes('script') && text.includes('task')) ||
+        id.includes('replace-with-ad-hoc-subprocess') ||
+        id.includes('replace-with-adhoc-subprocess') ||
+        text.includes('ad-hoc sub-process') ||
+        text.includes('adhoc sub-process') ||
+        text.includes('ad hoc sub-process')
+      ) {
+        el.remove();
+        return true;
+      }
+      return false;
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      let changed = false;
+      mutations.forEach((m) => {
+        if (m.addedNodes && m.addedNodes.length) {
+          m.addedNodes.forEach((n) => {
+            if (!(n instanceof Element)) return;
+            if (n.matches && n.matches('.djs-popup .entry')) {
+              changed = hideEntry(n) || changed;
+            }
+            n.querySelectorAll && n.querySelectorAll('.djs-popup .entry').forEach((el) => {
+              changed = hideEntry(el) || changed;
+            });
+          });
+        }
+      });
+      // Keine weitere Aktion nötig; Entfernen aus DOM reicht.
+    });
+
+    observer.observe(document.body, { subtree: true, childList: true });
+  })();
 })();

@@ -75,3 +75,32 @@ button:hover { border-color: #cbd5e1; background: #f1f5f9; }
 .djs-palette .entry[data-action="create.data-object-reference"] {
   display: none !important;
 }
+
+/* Auch Sub-Process und Script Task in Palette & Context Pad/Replace-Menü entfernen */
+/* Palette */
+.djs-palette .entry[data-action="create.script-task"] {
+  display: none !important;
+}
+/* Context Pad */
+.djs-context-pad .entry[data-action="append.subprocess-collapsed"],
+.djs-context-pad .entry[data-action="append.script-task"] {
+  display: none !important;
+}
+/* Replace-Menü (Change element) */
+.djs-popup .entry[data-id="replace-with-subprocess-collapsed"],
+.djs-popup .entry[data-id="replace-with-ad-hoc-subprocess"],
+.djs-popup .entry[data-id="replace-with-adhoc-subprocess"],
+.djs-popup .entry[data-id="replace-with-script-task"] {
+  display: none !important;
+}
+
+/* Falls es einen Palette-Eintrag für collapsed gäbe, ebenfalls verbergen */
+.djs-palette .entry[data-action="create.subprocess-collapsed"] {
+  display: none !important;
+}
+/* Vorsorglich: ad-hoc Sub-Process in der Palette */
+.djs-palette .entry[data-action="create.ad-hoc-subprocess"],
+.djs-palette .entry[data-action="create.ad-hoc-subprocess-expanded"],
+.djs-palette .entry[data-action="create.adhoc-subprocess"] {
+  display: none !important;
+}
