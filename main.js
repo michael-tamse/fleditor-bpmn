@@ -11,13 +11,42 @@
   const $ = (sel) => document.querySelector(sel);
   const statusEl = $('#status');
 
-  // Erstelle Modeler
+  // Erstelle Modeler inkl. Properties Panel (UMD global)
+  const ns = window.BpmnPropertiesPanel || window.BpmnJSPropertiesPanel || window.BpmnJsPropertiesPanel || {};
+  const maybePanelModule = window.BpmnPropertiesPanelModule || ns.BpmnPropertiesPanelModule || ns.panel || ns.default || window.BpmnPropertiesPanel;
+  const maybeProviderModule = window.BpmnPropertiesProviderModule || ns.BpmnPropertiesProviderModule || ns.provider;
+  const additionalModules = [];
+  if (maybePanelModule) additionalModules.push(maybePanelModule);
+  if (maybeProviderModule) additionalModules.push(maybeProviderModule);
+  if (!maybePanelModule || !maybeProviderModule) {
+    console.warn('Properties panel modules not detected. Found:', {
+      BpmnPropertiesPanelModule: !!(ns && ns.BpmnPropertiesPanelModule),
+      BpmnPropertiesProviderModule: !!(ns && ns.BpmnPropertiesProviderModule),
+      ns: Object.keys(ns).join(', ')
+    });
+  }
+
   const modeler = new BpmnJS({
     container: '#canvas',
+    propertiesPanel: { parent: '#properties' },
+    additionalModules
   });
 
+  // Fallback: falls die UMD-Variante attachTo erfordert
+  try {
+    const panelSvc = modeler.get('propertiesPanel', false);
+    if (panelSvc && typeof panelSvc.attachTo === 'function') {
+      panelSvc.attachTo('#properties');
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // Provider-Anpassungen registrieren (vor dem ersten Import)
+  customizeProviders();
+
   // UI anpassen: Entferne DataObject/DataStore in Palette & ContextPad
-  (function customizeProviders() {
+  function customizeProviders() {
     try {
       const injector = modeler.get('injector');
 
@@ -51,6 +80,14 @@
             const v = entries[k];
             const title = (v && (v.title || v.alt || '')) + '';
             if (/ad[- ]?hoc/i.test(k) || /ad[- ]?hoc/i.test(title)) {
+              delete entries[k];
+            }
+          });
+          // Entferne Link Intermediate Events aus der Palette (vorsorglich)
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || v.alt || '')) + '';
+            if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/i.test(title) && /event/i.test(title))) {
               delete entries[k];
             }
           });
@@ -105,6 +142,27 @@
           delete entries['append.script-task'];
           delete entries['create.script-task'];
 
+          // Entferne Link Intermediate Catch/Throw Einträge im Context Pad (sofern direkt vorhanden)
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || '')) + '';
+            if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/i.test(title) && /event/i.test(title))) {
+              delete entries[k];
+            }
+          });
+          delete entries['append.intermediate-link-catch-event'];
+          delete entries['append.intermediate-link-throw-event'];
+
+          // Entferne Complex Gateway aus dem Context Pad (direkte Einträge)
+          Object.keys(entries).forEach((k) => {
+            const v = entries[k];
+            const title = (v && (v.title || '')) + '';
+            if ((/complex/i.test(k) && /gateway/i.test(k)) || (/complex/i.test(title) && /gateway/i.test(title))) {
+              delete entries[k];
+            }
+          });
+          delete entries['append.complex-gateway'];
+
           return entries;
         };
       }
@@ -122,14 +180,25 @@
             const isExpanded = entry && entry.target && Object.prototype.hasOwnProperty.call(entry.target, 'isExpanded')
               ? !!entry.target.isExpanded
               : undefined;
+            const tgt = entry && entry.target || {};
+            const isEventSub = !!tgt.isTriggeredByEvent;
 
-            // Entferne nur Sub-Process (collapsed), expanded erlauben
+            // Entferne Sub-Process (collapsed)
             if (
               // robuste Erkennung über Zieltyp + Flag
               (targetType === 'bpmn:SubProcess' && isExpanded === false) ||
               // oder konservativ über ID/Label-Fallbacks
               /sub[- ]?process.*collapsed/i.test(id) || /collapsed.*sub[- ]?process/i.test(id) ||
               (/sub[- ]?process/i.test(label) && /collapsed/i.test(label))
+            ) {
+              return false;
+            }
+
+            // Entferne Sub-Process (expanded) NUR für normalen Sub-Process (nicht Event Sub-Process)
+            if (
+              (targetType === 'bpmn:SubProcess' && isExpanded === true && !isEventSub) ||
+              (/sub[- ]?process.*expanded/i.test(id) && !/event/i.test(id)) ||
+              ((/sub[- ]?process/i.test(label) && /expanded/i.test(label)) && !/event/i.test(label))
             ) {
               return false;
             }
@@ -141,6 +210,17 @@
 
             // Entferne Ad-hoc Sub-Process Optionen
             if (/ad[- ]?hoc/i.test(id) || /ad[- ]?hoc/i.test(label) || /bpmn:AdHocSubProcess$/.test(targetType)) {
+              return false;
+            }
+
+            // Entferne Link Intermediate Catch/Throw Events
+            const evDef = tgt.eventDefinitionType || tgt.eventDefinition;
+            if (/link/i.test(id) || /\blink\b/i.test(label) || /LinkEventDefinition$/.test(String(evDef))) {
+              return false;
+            }
+
+            // Entferne Complex Gateway aus Replace-Menüs
+            if (/complex[- ]?gateway/i.test(id) || (/complex/i.test(label) && /gateway/i.test(label)) || /bpmn:ComplexGateway$/.test(targetType)) {
               return false;
             }
 
@@ -160,7 +240,7 @@
       // still continue if customization fails
       console.warn('Palette/ContextPad customization failed:', e);
     }
-  })();
+  }
 
   // Starter Diagramm (minimales BPMN 2.0)
   const initialXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -293,7 +373,8 @@
   $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
   $('#btn-fit')?.addEventListener('click', fitViewport);
 
-  // Initial laden
+  // (Hinweis: UMD lädt vor main.js, daher sofort einsatzbereit)
+  // Startdiagramm laden, nachdem alle Funktionen/Constants definiert sind
   createNew();
 
   // Hilfsfunktion: Script Tasks verhindern (ersetzt zu bpmn:Task)
@@ -335,13 +416,21 @@
       if (
         id.includes('replace-with-subprocess-collapsed') ||
         (text.includes('sub-process') && text.includes('collapsed')) ||
+        // Expanded (aber nicht Event Sub-Process) ausblenden
+        (id.includes('replace-with-subprocess-expanded')) ||
+        (text.includes('sub-process') && text.includes('expanded') && !text.includes('event')) ||
         id.includes('replace-with-script-task') ||
         (text.includes('script') && text.includes('task')) ||
         id.includes('replace-with-ad-hoc-subprocess') ||
         id.includes('replace-with-adhoc-subprocess') ||
         text.includes('ad-hoc sub-process') ||
         text.includes('adhoc sub-process') ||
-        text.includes('ad hoc sub-process')
+        text.includes('ad hoc sub-process') ||
+        id.includes('replace-with-complex-gateway') ||
+        text.includes('complex gateway') ||
+        // Link Intermediate Catch/Throw im Replace-Popup
+        (id.includes('link') && id.includes('event')) ||
+        (text.includes('link') && text.includes('intermediate') && text.includes('event'))
       ) {
         el.remove();
         return true;

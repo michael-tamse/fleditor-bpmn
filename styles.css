@@ -41,8 +41,25 @@ button {
 button:hover { border-color: #cbd5e1; background: #f1f5f9; }
 
 .editor { height: calc(100% - 96px); }
-.canvas {
+
+/* Zwei-Spalten-Layout: Canvas | Properties */
+.panes {
   height: 100%;
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 0;
+}
+.canvas { height: 100%; }
+.properties {
+  height: 100%;
+  overflow: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+  .panes { grid-template-columns: 1fr; }
+  .properties { display: none; }
 }
 
 .footer {
@@ -81,16 +98,33 @@ button:hover { border-color: #cbd5e1; background: #f1f5f9; }
 .djs-palette .entry[data-action="create.script-task"] {
   display: none !important;
 }
+/* Vorsorglich: Link-Events über Palette verbergen (falls vorhanden) */
+.djs-palette .entry[data-action*="link"] {
+  display: none !important;
+}
 /* Context Pad */
 .djs-context-pad .entry[data-action="append.subprocess-collapsed"],
 .djs-context-pad .entry[data-action="append.script-task"] {
   display: none !important;
 }
+.djs-context-pad .entry[data-action="append.complex-gateway"] {
+  display: none !important;
+}
+/* Link Intermediate Events über Context Pad (falls eigene Actions existieren) */
+.djs-context-pad .entry[data-action*="link"] {
+  display: none !important;
+}
 /* Replace-Menü (Change element) */
 .djs-popup .entry[data-id="replace-with-subprocess-collapsed"],
+.djs-popup .entry[data-id="replace-with-subprocess-expanded"],
 .djs-popup .entry[data-id="replace-with-ad-hoc-subprocess"],
 .djs-popup .entry[data-id="replace-with-adhoc-subprocess"],
+.djs-popup .entry[data-id="replace-with-complex-gateway"],
 .djs-popup .entry[data-id="replace-with-script-task"] {
+  display: none !important;
+}
+/* Replace-Menü: Link Event Optionen generell verstecken */
+.djs-popup .entry[data-id*="link"] {
   display: none !important;
 }
 
