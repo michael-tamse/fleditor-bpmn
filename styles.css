@@ -1,0 +1,77 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f8fafc; /* helles Panel */
+  --text: #0f172a;  /* nahezu schwarz */
+  --muted: #475569; /* gedämpfter Text */
+  --accent: #2563eb; /* Blau-Akzent */
+  --border: #e5e7eb; /* helle Rahmenfarbe */
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--text);
+  background: var(--bg);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.toolbar__left, .toolbar__right { display: flex; align-items: center; gap: 8px; }
+.divider { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+
+button {
+  background: #ffffff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:hover { border-color: #cbd5e1; background: #f1f5f9; }
+
+.editor { height: calc(100% - 96px); }
+.canvas {
+  height: 100%;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.status { opacity: 0.9; }
+
+/* bpmn.io Standard-Stile funktionieren im hellen Modus ohne Invert-Workarounds */
+/* Optionale leichte Anpassungen für die Ränder */
+.djs-palette, .djs-context-pad { border-color: var(--border); }
+
+/* bpmn.io Wasserzeichen/Logo unten rechts ausblenden */
+.bjs-powered-by,
+.bjs-powered-by a {
+  display: none !important;
+}
+
+/* Bestimmte Palette-Einträge ausblenden */
+.djs-palette .entry[data-action="create.group"],
+.djs-palette .entry[data-action="create.participant-expanded"],
+.djs-palette .entry[data-action="create.data-store-reference"],
+.djs-palette .entry[data-action="create.data-object-reference"] {
+  display: none !important;
+}

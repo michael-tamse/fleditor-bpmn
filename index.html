@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BPMN Editor – bpmn.io</title>
+
+    <!-- bpmn.io styles from CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17/dist/assets/diagram-js.css">
+    <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17/dist/assets/bpmn-js.css">
+    <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17/dist/assets/bpmn-font/css/bpmn.css">
+    <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17/dist/assets/bpmn-font/css/bpmn-codes.css">
+
+    <!-- App styles -->
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar__left">
+        <button id="btn-new" title="Neues Diagramm">Neu</button>
+        <button id="btn-open" title="BPMN-Datei öffnen">Öffnen</button>
+        <input id="file-input" type="file" accept=".bpmn,.xml,.bpmn20.xml" hidden />
+        <span class="divider"></span>
+        <button id="btn-save-xml" title="Als BPMN speichern">Speichern XML</button>
+        <button id="btn-save-svg" title="Als SVG speichern">Speichern SVG</button>
+      </div>
+      <div class="toolbar__right">
+        <button id="btn-zoom-out" title="Verkleinern">−</button>
+        <button id="btn-zoom-reset" title="100%">100%</button>
+        <button id="btn-zoom-in" title="Vergrößern">+</button>
+        <span class="divider"></span>
+        <button id="btn-fit" title="Auf Ansicht einpassen">Fit</button>
+      </div>
+    </header>
+
+    <main class="editor">
+      <div id="canvas" class="canvas" aria-label="BPMN Arbeitsfläche"></div>
+    </main>
+
+    <footer class="footer">
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </footer>
+
+    <!-- bpmn.io modeler from CDN -->
+    <script src="https://unpkg.com/bpmn-js@17/dist/bpmn-modeler.development.js"></script>
+
+    <!-- App code -->
+    <script src="./main.js"></script>
+  </body>
+  </html>
