@@ -229,13 +229,8 @@
         };
       }
 
-      // Palette nach Import/Init neu zeichnen
-      modeler.on('import.done', () => {
-        const palette = modeler.get('palette', false);
-        if (palette && typeof palette._update === 'function') {
-          try { palette._update(); } catch (_) {}
-        }
-      });
+      // Hinweis: Kein erneutes Aktualisieren der Palette über private APIs.
+      // Die Palette wird einmalig mit unseren Provider-Overrides aufgebaut.
     } catch (e) {
       // still continue if customization fails
       console.warn('Palette/ContextPad customization failed:', e);
