@@ -42,6 +42,11 @@ function ExclusiveEntry(props: { element: BPMNElement }) {
   const translate = useService('translate');
   const element = props.element;
   const bo = element.businessObject;
+  const hasAsync = !!bo.get('flowable:asyncBefore') || !!bo.get('flowable:asyncAfter');
+  const isEvent = isStartOrEndEvent(element);
+  if (isEvent || !hasAsync) {
+    return null as any;
+  }
   const getValue = () => !!bo.get('flowable:exclusive');
   const setValue = (value: boolean) => modeling.updateProperties(element, { 'flowable:exclusive': !!value });
   return CheckboxEntry({ id: 'flowable-exclusive', element, label: translate ? translate('Exclusive') : 'Exclusive', getValue, setValue });
@@ -50,12 +55,10 @@ function ExclusiveEntry(props: { element: BPMNElement }) {
 function createFlowableGroup(element: BPMNElement) {
   const entries = [
     { id: 'flowable-asyncBefore', component: AsyncBeforeEntry },
-    { id: 'flowable-asyncAfter', component: AsyncAfterEntry }
+    { id: 'flowable-asyncAfter', component: AsyncAfterEntry },
+    // Exclusive entry decides visibility at render to react to async toggles instantly
+    { id: 'flowable-exclusive', component: ExclusiveEntry }
   ];
-  // Hide Exclusive on events
-  if (!isStartOrEndEvent(element)) {
-    entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry });
-  }
   return {
     id: 'flowable',
     label: 'Flowable',
@@ -89,4 +92,3 @@ export default {
   __init__: [ 'flowablePropertiesProvider' ],
   flowablePropertiesProvider: [ 'type', FlowablePropertiesProvider ]
 };
-
