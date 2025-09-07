@@ -57,43 +57,67 @@ function customizeProviders() {
 
     // Palette filter
     const paletteProvider = injector.get('paletteProvider', false);
+    const palette = modeler.get('palette', false);
     if (paletteProvider && typeof paletteProvider.getPaletteEntries === 'function') {
       const originalGet = paletteProvider.getPaletteEntries.bind(paletteProvider);
       paletteProvider.getPaletteEntries = function () {
         const entries = originalGet();
         const keys = Object.keys(entries);
         keys.forEach((k) => {
-          if (/data-(object|store)/i.test(k)) {
+          if (/data-(object|store)/i.test(k)) delete entries[k];
+        });
+        // Explicit removes
+        [
+          'create.data-object',
+          'create.data-object-reference',
+          'create.data-store',
+          'create.data-store-reference',
+          'create.subprocess-collapsed',
+          'create.participant-expanded',
+          'create.empty-pool',
+          'create.expanded-pool'
+        ].forEach((id) => delete (entries as any)[id]);
+        // Label/title based filtering for robustness across versions
+        Object.keys(entries).forEach((k) => {
+          const v = entries[k];
+          const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
+          if (/script[- ]?task/i.test(k) || /\bscript\b/.test(title)) {
             delete entries[k];
           }
         });
-        delete entries['create.data-object'];
-        delete entries['create.data-object-reference'];
-        delete entries['create.data-store'];
-        delete entries['create.data-store-reference'];
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
-          const title = (v && (v.title || v.alt || '')) + '';
-          if (/script[- ]?task/i.test(k) || /\bscript\b/i.test(title)) {
-            delete entries[k];
-          }
-        });
-        Object.keys(entries).forEach((k) => {
-          const v = entries[k];
-          const title = (v && (v.title || v.alt || '')) + '';
+          const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
           if (/ad[- ]?hoc/i.test(k) || /ad[- ]?hoc/i.test(title)) {
             delete entries[k];
           }
         });
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
-          const title = (v && (v.title || v.alt || '')) + '';
-          if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/i.test(title) && /event/i.test(title))) {
+          const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
+          if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/.test(title) && /event/.test(title))) {
+            delete entries[k];
+          }
+        });
+        // Sub-Process (collapsed) removal via label
+        Object.keys(entries).forEach((k) => {
+          const v = entries[k];
+          const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
+          if (/sub-?process/.test(title) && /collapsed/.test(title)) delete entries[k];
+        });
+        // Expanded/Empty Pool removal via label
+        Object.keys(entries).forEach((k) => {
+          const v = entries[k];
+          const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
+          if ((/pool/.test(title) || /participant/.test(title)) && (/expanded/.test(title) || /empty/.test(title))) {
             delete entries[k];
           }
         });
         return entries;
       };
+      try { console.debug && console.debug('[Palette] provider patched'); } catch {}
+      // force rebuild so palette UI reflects our override
+      try { palette && typeof palette._rebuild === 'function' && palette._rebuild(); } catch {}
     }
 
     const contextPadProvider = injector.get('contextPadProvider', false);
@@ -108,29 +132,20 @@ function customizeProviders() {
       contextPadProvider.getContextPadEntries = function (element) {
         const entries = originalGetCP(element) || {};
 
-        Object.keys(entries).forEach((k) => {
-          if (/data-(object|store)/i.test(k)) {
-            delete entries[k];
-          }
-        });
+        Object.keys(entries).forEach((k) => { if (/data-(object|store)/i.test(k)) delete entries[k]; });
         delete entries['append.data-object-reference'];
         delete entries['append.data-store-reference'];
         delete entries['create.data-object'];
         delete entries['create.data-store'];
 
-        if (isTask(element)) {
-          Object.keys(entries).forEach((k) => {
-            if (/sub[- ]?process.*collapsed/i.test(k)) {
-              delete entries[k];
-            }
-          });
-          delete entries['append.subprocess-collapsed'];
-        }
+        // Remove collapsed subprocess append options globally
+        Object.keys(entries).forEach((k) => { if (/sub[- ]?process.*collapsed/i.test(k)) delete entries[k]; });
+        delete entries['append.subprocess-collapsed'];
 
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
-          const title = (v && (v.title || '')) + '';
-          if (/script[- ]?task/i.test(k) || /\bscript\b/i.test(title)) {
+          const title = ((v && (v.title || '')) + '').toLowerCase();
+          if (/script[- ]?task/i.test(k) || /\bscript\b/.test(title)) {
             delete entries[k];
           }
         });
@@ -139,20 +154,16 @@ function customizeProviders() {
 
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
-          const title = (v && (v.title || '')) + '';
-          if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/i.test(title) && /event/i.test(title))) {
-            delete entries[k];
-          }
+          const title = ((v && (v.title || '')) + '').toLowerCase();
+          if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/.test(title) && /event/.test(title))) delete entries[k];
         });
         delete entries['append.intermediate-link-catch-event'];
         delete entries['append.intermediate-link-throw-event'];
 
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
-          const title = (v && (v.title || '')) + '';
-          if ((/complex/i.test(k) && /gateway/i.test(k)) || (/complex/i.test(title) && /gateway/i.test(title))) {
-            delete entries[k];
-          }
+          const title = ((v && (v.title || '')) + '').toLowerCase();
+          if ((/complex/i.test(k) && /gateway/i.test(k)) || (/complex/.test(title) && /gateway/.test(title))) delete entries[k];
         });
         delete entries['append.complex-gateway'];
 
@@ -175,6 +186,10 @@ function customizeProviders() {
           const tgt = entry && entry.target || {};
           const isEventSub = !!tgt.isTriggeredByEvent;
 
+          // Remove Data Object/Store Reference
+          if (/data[- ]?(object|store)/i.test(id) || /data[- ]?(object|store)/i.test(label) || /Data(Object|Store)Reference$/.test(targetType)) {
+            return false;
+          }
           if ((targetType === 'bpmn:SubProcess' && isExpanded === false)
             || /sub[- ]?process.*collapsed/i.test(id)
             || (/sub[- ]?process/i.test(label) && /collapsed/i.test(label))) {
@@ -186,6 +201,11 @@ function customizeProviders() {
             return false;
           }
           if (/replace-with-script-task/i.test(id) || (/script/i.test(label) && /task/i.test(label)) || /bpmn:ScriptTask$/.test(targetType)) {
+            return false;
+          }
+          // Remove Pools (Expanded/Empty/Participant)
+          if (/pool|participant/i.test(id) || (/pool|participant/i.test(label)) || /bpmn:Participant$/.test(targetType)) {
+            // keep generic collaboration transforms out
             return false;
           }
           if (/replace-with-adhoc-subprocess|replace-with-ad-hoc-subprocess/i.test(id) || /ad[- ]?hoc/i.test(label)) {
@@ -201,6 +221,42 @@ function customizeProviders() {
           return true;
         });
       };
+    }
+
+    // Popup menu filter (Create/Append search menu)
+    const popupMenu = injector.get('popupMenu', false);
+    if (popupMenu && typeof popupMenu.registerProvider === 'function') {
+      const filterProvider = {
+        getPopupMenuEntries(target: any) {
+          return function(entries: Record<string, any>) {
+            const out: Record<string, any> = {};
+            const shouldRemove = (id: string, e: any) => {
+              const label = ((e && e.label) ? String(e.label) : '').toLowerCase();
+              return (
+                /data-(object|store)-reference/.test(id) ||
+                /script-task/.test(id) ||
+                /(collapsed|subprocess)-subprocess/.test(id) ||
+                /(expanded|collapsed)-pool/.test(id) ||
+                // label based fallbacks
+                /data\s+object\s+reference/.test(label) ||
+                /data\s+store\s+reference/.test(label) ||
+                (/pool/.test(label) && (/(expanded|empty)/.test(label))) ||
+                (/sub\s*-?process/.test(label) && /collapsed/.test(label)) ||
+                (/script/.test(label) && /task/.test(label))
+              );
+            };
+            Object.keys(entries).forEach((id) => {
+              const e = (entries as any)[id];
+              if (!shouldRemove(id, e)) out[id] = e;
+            });
+            return out;
+          };
+        }
+      };
+      try { console.debug && console.debug('[PopupMenu] filter provider registered'); } catch {}
+      // Register with very low priority so we run LAST and can prune entries
+      try { popupMenu.registerProvider('bpmn-append', 1 as any, filterProvider); } catch (_) { popupMenu.registerProvider('bpmn-append', filterProvider); }
+      try { popupMenu.registerProvider('bpmn-create', 1 as any, filterProvider); } catch (_) { popupMenu.registerProvider('bpmn-create', filterProvider); }
     }
   } catch (e) {
     console.warn('Palette/ContextPad customization failed:', e);
