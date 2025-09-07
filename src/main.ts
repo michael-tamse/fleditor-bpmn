@@ -1,4 +1,5 @@
 import BpmnModeler from 'bpmn-js/lib/Modeler';
+import type { ModdleElement } from 'bpmn-moddle';
 // CSS (bundled)
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
@@ -7,15 +8,15 @@ import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-codes.css';
 import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js-properties-panel';
 
-import FlowablePropertiesProviderModule from './flowable-properties-provider.js';
-import flowableModdle from './flowable-moddle.js';
+import FlowablePropertiesProviderModule from './flowable-properties-provider';
+import flowableModdle from './flowable-moddle';
 
-const $ = (sel) => document.querySelector(sel);
+const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
-let modeler;
+let modeler: any;
 
-function setStatus(msg) {
+function setStatus(msg?: string) {
   if (!statusEl) return;
   statusEl.textContent = msg || '';
 }
@@ -99,7 +100,7 @@ function customizeProviders() {
     if (contextPadProvider && typeof contextPadProvider.getContextPadEntries === 'function') {
       const originalGetCP = contextPadProvider.getContextPadEntries.bind(contextPadProvider);
 
-      function isTask(element) {
+      function isTask(element: any) {
         const t = (element && (element.type || (element.businessObject && element.businessObject.$type))) || '';
         return /Task$/.test(t);
       }
@@ -162,7 +163,7 @@ function customizeProviders() {
     const replaceMenuProvider = injector.get('replaceMenuProvider', false);
     if (replaceMenuProvider && typeof replaceMenuProvider.getEntries === 'function') {
       const originalReplaceEntries = replaceMenuProvider.getEntries.bind(replaceMenuProvider);
-      replaceMenuProvider.getEntries = function(element) {
+      replaceMenuProvider.getEntries = function(element: any) {
         const entries = originalReplaceEntries(element) || [];
         return entries.filter((entry) => {
           const id = String(entry.id || '');
@@ -233,12 +234,12 @@ async function createNew() {
   }
 }
 
-async function openFile(file) {
+async function openFile(file: File) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
-      await modeler.importXML(e.target.result);
+      await modeler.importXML((e.target as FileReader).result as string);
       sanitizeModel();
       modeler.get('canvas').zoom('fit-viewport', 'auto');
       setStatus(`Geladen: ${file.name}`);
@@ -253,9 +254,10 @@ async function openFile(file) {
 
 function triggerOpen() {
   const input = $('#file-input');
-  input.value = '';
-  input.onchange = () => openFile(input.files[0]);
-  input.click();
+  if (!input) return;
+  (input as HTMLInputElement).value = '';
+  (input as HTMLInputElement).onchange = () => openFile((input as HTMLInputElement).files![0]);
+  (input as HTMLInputElement).click();
 }
 
 async function saveXML() {
@@ -280,7 +282,7 @@ async function saveSVG() {
   }
 }
 
-function download(filename, data, type) {
+function download(filename: string, data: string, type: string) {
   const blob = new Blob([data], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -292,7 +294,7 @@ function download(filename, data, type) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function zoom(delta) {
+function zoom(delta: number) {
   const canvas = modeler.get('canvas');
   const current = canvas.zoom();
   canvas.zoom(Math.max(0.2, Math.min(4, current + delta)));

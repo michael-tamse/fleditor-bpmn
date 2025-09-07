@@ -1,5 +1,5 @@
 // ESM export of the Flowable moddle descriptor used for async flags
-export default {
+const flowableModdle: Record<string, any> = {
   name: 'Flowable',
   uri: 'http://flowable.org/bpmn',
   prefix: 'flowable',
@@ -18,3 +18,6 @@ export default {
     }
   ]
 };
+
+export default flowableModdle;
+
