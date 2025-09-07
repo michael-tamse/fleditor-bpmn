@@ -1,8 +1,18 @@
-import { CheckboxEntry, useService } from '@bpmn-io/properties-panel';
+import { CheckboxEntry } from '@bpmn-io/properties-panel';
+import { useService } from 'bpmn-js-properties-panel';
+
+function getType(element) {
+  return (element && element.businessObject && element.businessObject.$type) || '';
+}
 
 function isActivityLike(element) {
-  const t = element && element.businessObject && element.businessObject.$type || '';
+  const t = getType(element);
   return /Task$/.test(t) || /SubProcess$/.test(t) || /CallActivity$/.test(t);
+}
+
+function isStartOrEndEvent(element) {
+  const t = getType(element);
+  return /StartEvent$/.test(t) || /EndEvent$/.test(t);
 }
 
 function AsyncBeforeEntry(props) {
@@ -36,25 +46,38 @@ function ExclusiveEntry(props) {
 }
 
 function createFlowableGroup(element) {
+  const entries = [
+    { id: 'flowable-asyncBefore', component: AsyncBeforeEntry },
+    { id: 'flowable-asyncAfter', component: AsyncAfterEntry }
+  ];
+  // Hide Exclusive on events
+  if (!isStartOrEndEvent(element)) {
+    entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry });
+  }
   return {
     id: 'flowable',
     label: 'Flowable',
-    entries: [
-      { id: 'flowable-asyncBefore', component: AsyncBeforeEntry },
-      { id: 'flowable-asyncAfter', component: AsyncAfterEntry },
-      { id: 'flowable-exclusive', component: ExclusiveEntry }
-    ]
+    entries
   };
 }
 
 function FlowablePropertiesProvider(propertiesPanel) {
+  // define API first, then register
   this.getGroups = function(element) {
     return function(groups) {
-      if (!isActivityLike(element)) return groups;
-      groups.push(createFlowableGroup(element));
+      try { console.debug && console.debug('[FlowableProvider] getGroups for', getType(element), 'groups in:', groups && groups.length); } catch (e) {}
+      if (isActivityLike(element) || isStartOrEndEvent(element)) {
+        groups.push(createFlowableGroup(element));
+        try { console.debug && console.debug('[FlowableProvider] added Flowable group'); } catch (e) {}
+      }
       return groups;
     };
   };
+  if (propertiesPanel && typeof propertiesPanel.registerProvider === 'function') {
+    // priority: 500 (after default groups, before custom low-prio)
+    propertiesPanel.registerProvider(500, this);
+    try { console.debug && console.debug('FlowablePropertiesProvider registered'); } catch (e) {}
+  }
 }
 
 FlowablePropertiesProvider.$inject = [ 'propertiesPanel' ];
@@ -63,4 +86,3 @@ export default {
   __init__: [ 'flowablePropertiesProvider' ],
   flowablePropertiesProvider: [ 'type', FlowablePropertiesProvider ]
 };
-
