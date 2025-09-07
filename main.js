@@ -11,39 +11,50 @@
   const $ = (sel) => document.querySelector(sel);
   const statusEl = $('#status');
 
-  // Erstelle Modeler inkl. Properties Panel (UMD global)
-  const ns = window.BpmnPropertiesPanel || window.BpmnJSPropertiesPanel || window.BpmnJsPropertiesPanel || {};
-  const maybePanelModule = window.BpmnPropertiesPanelModule || ns.BpmnPropertiesPanelModule || ns.panel || ns.default || window.BpmnPropertiesPanel;
-  const maybeProviderModule = window.BpmnPropertiesProviderModule || ns.BpmnPropertiesProviderModule || ns.provider;
-  const additionalModules = [];
-  if (maybePanelModule) additionalModules.push(maybePanelModule);
-  if (maybeProviderModule) additionalModules.push(maybeProviderModule);
-  if (!maybePanelModule || !maybeProviderModule) {
-    console.warn('Properties panel modules not detected. Found:', {
-      BpmnPropertiesPanelModule: !!(ns && ns.BpmnPropertiesPanelModule),
-      BpmnPropertiesProviderModule: !!(ns && ns.BpmnPropertiesProviderModule),
-      ns: Object.keys(ns).join(', ')
+  // Verzögerte Initialisierung, bis Properties-Module verfügbar
+  let modeler;
+  function initModeler() {
+    if (modeler) return;
+
+    const ns = window.BpmnPropertiesPanel || window.BpmnJSPropertiesPanel || window.BpmnJsPropertiesPanel || {};
+    const maybePanelModule = window.BpmnPropertiesPanelModule || ns.BpmnPropertiesPanelModule || ns.panel || ns.default || window.BpmnPropertiesPanel;
+    const maybeProviderModule = window.BpmnPropertiesProviderModule || ns.BpmnPropertiesProviderModule || ns.provider;
+    const additionalModules = [];
+    if (maybePanelModule) additionalModules.push(maybePanelModule);
+    if (maybeProviderModule) additionalModules.push(maybeProviderModule);
+    if (window.FlowablePropertiesProviderModule) additionalModules.push(window.FlowablePropertiesProviderModule);
+    if (!maybePanelModule || !maybeProviderModule) {
+      console.warn('Properties panel modules not detected. Found:', {
+        BpmnPropertiesPanelModule: !!(ns && ns.BpmnPropertiesPanelModule),
+        BpmnPropertiesProviderModule: !!(ns && ns.BpmnPropertiesProviderModule),
+        ns: Object.keys(ns).join(', ')
+      });
+    }
+
+    modeler = new BpmnJS({
+      container: '#canvas',
+      propertiesPanel: { parent: '#properties' },
+      additionalModules,
+      moddleExtensions: window.FlowableModdleDescriptor ? { flowable: window.FlowableModdleDescriptor } : undefined
+    });
+
+    try {
+      const panelSvc = modeler.get('propertiesPanel', false);
+      if (panelSvc && typeof panelSvc.attachTo === 'function') {
+        panelSvc.attachTo('#properties');
+      }
+    } catch (e) {}
+
+    // Provider-Anpassungen registrieren (vor dem ersten Import)
+    customizeProviders();
+    // Startdiagramm laden
+    createNew();
+
+    // Nach jedem Import sicherstellen
+    modeler.on('import.done', () => {
+      sanitizeModel();
     });
   }
-
-  const modeler = new BpmnJS({
-    container: '#canvas',
-    propertiesPanel: { parent: '#properties' },
-    additionalModules
-  });
-
-  // Fallback: falls die UMD-Variante attachTo erfordert
-  try {
-    const panelSvc = modeler.get('propertiesPanel', false);
-    if (panelSvc && typeof panelSvc.attachTo === 'function') {
-      panelSvc.attachTo('#properties');
-    }
-  } catch (e) {
-    // ignore
-  }
-
-  // Provider-Anpassungen registrieren (vor dem ersten Import)
-  customizeProviders();
 
   // UI anpassen: Entferne DataObject/DataStore in Palette & ContextPad
   function customizeProviders() {
@@ -368,9 +379,15 @@
   $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
   $('#btn-fit')?.addEventListener('click', fitViewport);
 
-  // (Hinweis: UMD lädt vor main.js, daher sofort einsatzbereit)
-  // Startdiagramm laden, nachdem alle Funktionen/Constants definiert sind
-  createNew();
+  // Init sobald Properties-Module bereit sind
+  if (window.BpmnPropertiesPanelModule && window.BpmnPropertiesProviderModule) {
+    initModeler();
+  } else {
+    window.addEventListener('bpmn-properties-modules-ready', initModeler, { once: true });
+    // Fallback Timeout
+    setTimeout(initModeler, 800);
+  }
+  // Startdiagramm wird im Rahmen von initModeler() geladen
 
   // Hilfsfunktion: Script Tasks verhindern (ersetzt zu bpmn:Task)
   function sanitizeModel() {
@@ -391,15 +408,7 @@
     }
   }
 
-  // Auch nach jedem Import sicherstellen
-  modeler.on('import.done', () => {
-    sanitizeModel();
-    // Palette nach Anpassungen neu zeichnen
-    const palette = modeler.get('palette', false);
-    if (palette && typeof palette._update === 'function') {
-      try { palette._update(); } catch (_) {}
-    }
-  });
+  // Hinweis: import.done-Listener wird nach Modeler-Init registriert
 
   // Fallback: DOM-basiertes Ausblenden von Replace-Menü-Einträgen,
   // falls Provider-Overrides eine Variante nicht abdecken.
