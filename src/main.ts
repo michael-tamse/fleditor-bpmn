@@ -1,5 +1,4 @@
 import BpmnModeler from 'bpmn-js/lib/Modeler';
-import type { ModdleElement } from 'bpmn-moddle';
 // CSS (bundled)
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
@@ -129,7 +128,7 @@ function customizeProviders() {
         return /Task$/.test(t);
       }
 
-      contextPadProvider.getContextPadEntries = function (element) {
+      contextPadProvider.getContextPadEntries = function (element: any) {
         const entries = originalGetCP(element) || {};
 
         Object.keys(entries).forEach((k) => { if (/data-(object|store)/i.test(k)) delete entries[k]; });
@@ -176,7 +175,7 @@ function customizeProviders() {
       const originalReplaceEntries = replaceMenuProvider.getEntries.bind(replaceMenuProvider);
       replaceMenuProvider.getEntries = function(element: any) {
         const entries = originalReplaceEntries(element) || [];
-        return entries.filter((entry) => {
+        return entries.filter((entry: any) => {
           const id = String(entry.id || '');
           const label = String(entry.label || '');
           const targetType = entry && entry.target && entry.target.type ? String(entry.target.type) : '';
@@ -370,8 +369,8 @@ function sanitizeModel() {
     const elementRegistry = modeler.get('elementRegistry');
     const bpmnReplace = modeler.get('bpmnReplace');
     if (!elementRegistry || !bpmnReplace) return;
-    const scriptTasks = elementRegistry.filter((el) => el?.businessObject?.$type === 'bpmn:ScriptTask');
-    scriptTasks.forEach((el) => {
+    const scriptTasks = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ScriptTask');
+    scriptTasks.forEach((el: any) => {
       try {
         bpmnReplace.replaceElement(el, { type: 'bpmn:Task' });
       } catch (e) {
@@ -385,14 +384,15 @@ function sanitizeModel() {
 
 // Drag & Drop Import
 function setupDragAndDrop() {
-  const target = $('#canvas');
+  const target = $<HTMLElement>('#canvas');
   if (!target) return;
-  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((evt) => {
-    target.addEventListener(evt, stop, false);
+  const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+  const dragEvents: Array<keyof HTMLElementEventMap> = ['dragenter', 'dragover', 'dragleave', 'drop'];
+  dragEvents.forEach((evt) => {
+    target.addEventListener(evt, stop as EventListener, false);
   });
-  target.addEventListener('drop', (e) => {
-    const file = e.dataTransfer?.files?.[0];
+  target.addEventListener('drop', (e: Event) => {
+    const file = (e as DragEvent).dataTransfer?.files?.[0] as File | undefined;
     if (file) openFile(file);
   });
 }
