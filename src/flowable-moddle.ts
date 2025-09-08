@@ -11,13 +11,17 @@ const flowableModdle: Record<string, any> = {
       // allow flags on Activities as well as Start/End events
       extends: [ 'bpmn:Activity', 'bpmn:StartEvent', 'bpmn:EndEvent' ],
       properties: [
+        // Flowable engine execution flags
+        { name: 'async', isAttr: true, type: 'Boolean' },
+        { name: 'exclusive', isAttr: true, type: 'Boolean' },
+        { name: 'asyncLeave', isAttr: true, type: 'Boolean' },
+        { name: 'asyncLeaveExclusive', isAttr: true, type: 'Boolean' },
+        // keep legacy aliases for compatibility (no UI)
         { name: 'asyncBefore', isAttr: true, type: 'Boolean' },
-        { name: 'asyncAfter', isAttr: true, type: 'Boolean' },
-        { name: 'exclusive', isAttr: true, type: 'Boolean' }
+        { name: 'asyncAfter', isAttr: true, type: 'Boolean' }
       ]
     }
   ]
 };
 
 export default flowableModdle;
-

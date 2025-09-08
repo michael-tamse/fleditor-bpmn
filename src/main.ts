@@ -46,6 +46,7 @@ function initModeler() {
 
   modeler.on('import.done', () => {
     sanitizeModel();
+    migrateAsyncFlags();
   });
 }
 
@@ -379,6 +380,41 @@ function sanitizeModel() {
     });
   } catch (e) {
     console.warn('Sanitize fehlgeschlagen:', e);
+  }
+}
+
+// Migrate legacy asyncBefore/asyncAfter to Flowable async/asyncLeave
+function migrateAsyncFlags() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    if (!elementRegistry || !modeling) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || !bo.get) return;
+      const hasBefore = typeof bo.get('flowable:asyncBefore') !== 'undefined';
+      const hasAfter = typeof bo.get('flowable:asyncAfter') !== 'undefined';
+      const vBefore = !!bo.get('flowable:asyncBefore');
+      const vAfter = !!bo.get('flowable:asyncAfter');
+      const updates: any = {};
+      let dirty = false;
+      if (hasBefore) {
+        if (vBefore && !bo.get('flowable:async')) { updates['flowable:async'] = true; dirty = true; }
+        updates['flowable:asyncBefore'] = undefined; dirty = true;
+      }
+      if (hasAfter) {
+        if (vAfter && !bo.get('flowable:asyncLeave')) { updates['flowable:asyncLeave'] = true; dirty = true; }
+        updates['flowable:asyncAfter'] = undefined; dirty = true;
+      }
+      if (dirty) {
+        try { modeling.updateProperties(el, updates); } catch (e) { /* ignore */ }
+      }
+    });
+  } catch (e) {
+    console.warn('Migration async flags failed:', e);
   }
 }
 
