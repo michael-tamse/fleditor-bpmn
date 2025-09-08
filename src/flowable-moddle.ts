@@ -20,6 +20,14 @@ const flowableModdle: Record<string, any> = {
         { name: 'asyncBefore', isAttr: true, type: 'Boolean' },
         { name: 'asyncAfter', isAttr: true, type: 'Boolean' }
       ]
+    },
+    {
+      name: 'ServiceTaskProps',
+      isAbstract: true,
+      extends: [ 'bpmn:ServiceTask' ],
+      properties: [
+        { name: 'delegateExpression', isAttr: true, type: 'String' }
+      ]
     }
   ]
 };

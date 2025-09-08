@@ -1,4 +1,4 @@
-import { CheckboxEntry, Group, isCheckboxEntryEdited } from '@bpmn-io/properties-panel';
+import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
 
 type BPMNElement = any;
@@ -15,6 +15,22 @@ function isActivityLike(element: BPMNElement): boolean {
 function isStartOrEndEvent(element: BPMNElement): boolean {
   const t = getType(element);
   return /StartEvent$/.test(t) || /EndEvent$/.test(t);
+}
+
+function isServiceTask(element: BPMNElement): boolean {
+  return /ServiceTask$/.test(getType(element));
+}
+
+// Stable component for delegate expression to preserve focus across re-renders
+function DelegateExpressionEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const el = props.element;
+  const bo = el.businessObject;
+  const getValue = () => (bo.get && bo.get('flowable:delegateExpression')) || '';
+  const setValue = (value: string) => modeling.updateProperties(el, { 'flowable:delegateExpression': value || undefined });
+  return TextFieldEntry({ id: 'flowable-delegateExpression', element: el, label: translate ? translate('Delegate expression') : 'Delegate expression', getValue, setValue, debounce });
 }
 
 function AsyncEntry(props: { element: BPMNElement }) {
@@ -104,11 +120,23 @@ function createExecutionGroup(element: BPMNElement) {
   };
 }
 
-function FlowablePropertiesProvider(propertiesPanel: any) {
+function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
   // define API first, then register
   this.getGroups = function(element: BPMNElement) {
     return function(groups: any[]) {
       try { console.debug && console.debug('[FlowableProvider] getGroups for', getType(element), 'groups in:', groups && groups.length); } catch (e) {}
+      // Add Flowable Service Task "Delegate expression" field to General
+      if (isServiceTask(element)) {
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (general && Array.isArray(general.entries)) {
+          const exists = general.entries.some((e: any) => e && e.id === 'flowable-delegateExpression');
+          if (!exists) {
+            const idx = general.entries.findIndex((e: any) => e && e.id === 'id');
+            const def = { id: 'flowable-delegateExpression', component: DelegateExpressionEntry, isEdited: isTextFieldEntryEdited };
+            if (idx >= 0) general.entries.splice(idx + 1, 0, def); else general.entries.unshift(def);
+          }
+        }
+      }
       if (isActivityLike(element) || isStartOrEndEvent(element)) {
         groups.push(createExecutionGroup(element));
         try { console.debug && console.debug('[FlowableProvider] added Execution group'); } catch (e) {}

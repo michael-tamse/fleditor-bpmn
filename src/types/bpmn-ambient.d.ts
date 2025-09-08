@@ -11,10 +11,17 @@ declare module 'bpmn-js-properties-panel' {
   export default _default;
 }
 
+declare module '@bpmn-io/properties-panel' {
+  export const Group: any;
+  export const CheckboxEntry: any;
+  export const TextFieldEntry: any;
+  export const isCheckboxEntryEdited: (node?: any) => boolean;
+  export const isTextFieldEntryEdited: (node?: any) => boolean;
+}
+
 // Optional: keep for completeness if imported elsewhere
 declare module 'bpmn-moddle' {
   export type ModdleElement = any;
   const _default: any;
   export default _default;
 }
-
