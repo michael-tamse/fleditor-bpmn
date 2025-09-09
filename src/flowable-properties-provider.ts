@@ -1,5 +1,6 @@
 import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
+import { h } from '@bpmn-io/properties-panel/preact';
 
 type BPMNElement = any;
 
@@ -109,6 +110,29 @@ function ExclusiveLeaveEntry(props: { element: BPMNElement }) {
   return CheckboxEntry({ id: 'flowable-asyncLeaveExclusive', element, label: translate ? translate('Leave exclusive') : 'Leave exclusive', getValue, setValue });
 }
 
+// Standard BPMN: isForCompensation flag on activities
+function IsForCompensationEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => !!(bo.get ? bo.get('isForCompensation') : bo.isForCompensation);
+  const setValue = (value: boolean) => modeling.updateProperties(element, { isForCompensation: !!value });
+  return CheckboxEntry({ id: 'bpmn-isForCompensation', element, label: translate ? translate('Is for compensation') : 'Is for compensation', getValue, setValue });
+}
+
+// Simple spacer entry to visually separate groups of entries within a group
+function SpacerEntry() {
+  return h('div', {
+    className: 'bio-properties-panel-entry',
+    style: {
+      borderTop: '0.5px solid var(--color-grey-225-10-90)',
+      margin: '8px 0 0 0',
+      paddingTop: '8px'
+    }
+  } as any);
+}
+
 // Multi-Instance: Flowable collection
 function FlowableCollectionEntry(props: { element: BPMNElement }) {
   const modeling = useService('modeling');
@@ -154,24 +178,28 @@ function FlowableElementIndexVariableEntry(props: { element: BPMNElement }) {
   return TextFieldEntry({ id: 'flowable-elementIndexVariable', element, label: translate ? translate('Element index variable') : 'Element index variable', getValue, setValue, debounce });
 }
 
-function createExecutionGroup(element: BPMNElement) {
-  // Desired order:
-  // Asynchronous, Exclusive, Leave asynchronously, Leave exclusive
-  const entries: any[] = [ { id: 'flowable-async', component: AsyncEntry, isEdited: isCheckboxEntryEdited } ];
-  if (!isStartOrEndEvent(element)) {
-    entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry, isEdited: isCheckboxEntryEdited });
-  }
-  entries.push({ id: 'flowable-asyncLeave', component: AsyncLeaveEntry, isEdited: isCheckboxEntryEdited });
+  function createExecutionGroup(element: BPMNElement) {
+    // Desired order:
+    // Asynchronous, Exclusive, Leave asynchronously, Leave exclusive
+    const entries: any[] = [ { id: 'flowable-async', component: AsyncEntry, isEdited: isCheckboxEntryEdited } ];
+    if (!isStartOrEndEvent(element)) {
+      entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry, isEdited: isCheckboxEntryEdited });
+    }
+    entries.push({ id: 'flowable-asyncLeave', component: AsyncLeaveEntry, isEdited: isCheckboxEntryEdited });
   if (!isStartOrEndEvent(element)) {
     entries.push({ id: 'flowable-asyncLeaveExclusive', component: ExclusiveLeaveEntry, isEdited: isCheckboxEntryEdited });
   }
+  // Spacer between async/exclusive markers and generic flags
+  entries.push({ id: 'execution-spacer-1', component: SpacerEntry });
+  // New: Is for compensation
+  entries.push({ id: 'bpmn-isForCompensation', component: IsForCompensationEntry, isEdited: isCheckboxEntryEdited });
   return {
-    id: 'execution',
-    label: 'Execution',
-    entries,
-    component: Group
-  };
-}
+      id: 'execution',
+      label: 'Execution',
+      entries,
+      component: Group
+    };
+  }
 
 function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
   // define API first, then register
