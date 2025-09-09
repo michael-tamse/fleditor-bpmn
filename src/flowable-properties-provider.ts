@@ -21,6 +21,14 @@ function isServiceTask(element: BPMNElement): boolean {
   return /ServiceTask$/.test(getType(element));
 }
 
+// Only show Execution for engine-executed task types
+function isEngineExecutedTask(element: BPMNElement): boolean {
+  const t = getType(element);
+  // Include: ServiceTask, SendTask, ReceiveTask, BusinessRuleTask, ScriptTask, CallActivity
+  // Exclude: generic Task, UserTask, ManualTask, and non-task elements
+  return /^(bpmn:)?(ServiceTask|SendTask|ReceiveTask|BusinessRuleTask|ScriptTask|CallActivity)$/.test(t);
+}
+
 // Stable component for delegate expression to preserve focus across re-renders
 function DelegateExpressionEntry(props: { element: BPMNElement }) {
   const modeling = useService('modeling');
@@ -187,18 +195,42 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
       const loop = bo && bo.loopCharacteristics;
       const miGroup = groups && groups.find((g) => g && (g.id === 'multiInstance' || g.id === 'multiInstanceGroup'));
       if (loop && (miGroup && Array.isArray(miGroup.entries))) {
-        const want = [
+        const wantOrdered = [
           { id: 'flowable-collection', component: FlowableCollectionEntry },
           { id: 'flowable-elementVariable', component: FlowableElementVariableEntry },
           { id: 'flowable-elementIndexVariable', component: FlowableElementIndexVariableEntry }
         ];
-        want.forEach((def) => {
+        // ensure our Flowable fields exist
+        wantOrdered.forEach((def) => {
           const exists = miGroup.entries.some((e: any) => e && e.id === def.id);
-          if (!exists) {
-            miGroup.entries.push({ ...def, isEdited: isTextFieldEntryEdited });
-          }
+          if (!exists) miGroup.entries.push({ ...def, isEdited: isTextFieldEntryEdited });
         });
-        try { console.debug && console.debug('[FlowableProvider] added MI entries to Multi-Instance group'); } catch (e) {}
+        // reorder: put our fields first, then Loop cardinality + Completion condition, then the rest
+        const isOur = (id: string) => /^(flowable-(collection|elementVariable|elementIndexVariable))$/.test(id);
+        const isLoopCard = (id: string) => /cardinality/i.test(id) || /loop.*cardinality/i.test(id) || /loop-cardinality/i.test(id);
+        const isCompletion = (id: string) => /completion/i.test(id) && /condition/i.test(id);
+
+        const orderMap: Record<string, number> = {
+          'flowable-collection': 0,
+          'flowable-elementVariable': 1,
+          'flowable-elementIndexVariable': 2
+        };
+        const entries = miGroup.entries.slice();
+        const ours: any[] = [];
+        const loopAndCompletion: any[] = [];
+        const others: any[] = [];
+        entries.forEach((e: any) => {
+          const id = String(e && e.id || '');
+          if (!id) { others.push(e); return; }
+          if (isOur(id)) { ours.push(e); return; }
+          if (isLoopCard(id) || isCompletion(id)) { loopAndCompletion.push(e); return; }
+          others.push(e);
+        });
+        // sort our three in desired order
+        ours.sort((a, b) => (orderMap[String(a.id)] ?? 99) - (orderMap[String(b.id)] ?? 99));
+        const newEntries = [ ...ours, ...loopAndCompletion, ...others ];
+        miGroup.entries.splice(0, miGroup.entries.length, ...newEntries);
+        try { console.debug && console.debug('[FlowableProvider] ordered MI entries (ours first, then loop/completion)'); } catch (e) {}
       } else if (loop) {
         // Fallback: if built-in group not found, add our own MI group with these entries
         const entries: any[] = [
@@ -209,7 +241,7 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         groups.push({ id: 'flowable-multiInstance', label: 'Multi-Instance', entries, component: Group });
         try { console.debug && console.debug('[FlowableProvider] added fallback MI group'); } catch (e) {}
       }
-      if (isActivityLike(element) || isStartOrEndEvent(element)) {
+      if (isEngineExecutedTask(element)) {
         groups.push(createExecutionGroup(element));
         try { console.debug && console.debug('[FlowableProvider] added Execution group'); } catch (e) {}
       }
