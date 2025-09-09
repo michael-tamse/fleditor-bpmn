@@ -341,7 +341,8 @@ function triggerOpen() {
 async function saveXML() {
   try {
     const { xml } = await modeler.saveXML({ format: true });
-    download('diagram.bpmn', xml, 'application/xml');
+    const withCdata = wrapConditionExpressionsInCDATA(xml);
+    download('diagram.bpmn', withCdata, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
     console.error(err);
@@ -370,6 +371,25 @@ function download(filename: string, data: string, type: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Ensure all conditionExpression bodies are wrapped in CDATA
+function wrapConditionExpressionsInCDATA(xml: string): string {
+  try {
+    const re = /(<(?:[\w-]+:)?conditionExpression\b[^>]*>)([\s\S]*?)(<\/(?:[\w-]+:)?conditionExpression>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      const unescaped = trimmed
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+      return `${open}<![CDATA[${unescaped}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
 }
 
 function zoom(delta: number) {

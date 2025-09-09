@@ -1,4 +1,4 @@
-import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
+import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited, TextAreaEntry, isTextAreaEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
 import { h } from '@bpmn-io/properties-panel/preact';
 
@@ -20,6 +20,10 @@ function isStartOrEndEvent(element: BPMNElement): boolean {
 
 function isServiceTask(element: BPMNElement): boolean {
   return /ServiceTask$/.test(getType(element));
+}
+
+function isSequenceFlow(element: BPMNElement): boolean {
+  return /SequenceFlow$/.test(getType(element));
 }
 
 // Only show Execution for engine-executed task types
@@ -148,6 +152,53 @@ function FlowableCollectionEntry(props: { element: BPMNElement }) {
   return TextFieldEntry({ id: 'flowable-collection', element, label: translate ? translate('Collection') : 'Collection', getValue, setValue, debounce });
 }
 
+// Sequence Flow: Condition Expression (stores bpmn:FormalExpression on sequenceFlow.conditionExpression)
+function ConditionExpressionEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const bo = element.businessObject;
+
+  const getValue = () => {
+    const expr = bo && (bo.get ? bo.get('conditionExpression') : bo.conditionExpression);
+    if (!expr) return '';
+    const body = expr.get ? expr.get('body') : expr.body;
+    const text = expr.get ? expr.get('text') : expr.text;
+    return body || text || '';
+  };
+
+  const setValue = (value: string) => {
+    const v = (value || '').trim();
+    const current = bo && (bo.get ? bo.get('conditionExpression') : bo.conditionExpression);
+
+    if (!v) {
+      if (current) modeling.updateModdleProperties(element, bo, { conditionExpression: undefined });
+      return;
+    }
+
+    if (current && (/FormalExpression$/.test(current.$type || ''))) {
+      modeling.updateModdleProperties(element, current, { body: v });
+    } else {
+      const formal = bpmnFactory.create('bpmn:FormalExpression', { body: v });
+      modeling.updateModdleProperties(element, bo, { conditionExpression: formal });
+    }
+  };
+
+  return TextAreaEntry({
+    id: 'bpmn-conditionExpression',
+    element,
+    label: translate ? translate('Condition Expression') : 'Condition Expression',
+    getValue,
+    setValue,
+    debounce,
+    rows: 3,
+    monospace: true,
+    autoResize: true
+  });
+}
+
 // Multi-Instance: Flowable element variable
 function FlowableElementVariableEntry(props: { element: BPMNElement }) {
   const modeling = useService('modeling');
@@ -215,6 +266,19 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             const idx = general.entries.findIndex((e: any) => e && e.id === 'id');
             const def = { id: 'flowable-delegateExpression', component: DelegateExpressionEntry, isEdited: isTextFieldEntryEdited };
             if (idx >= 0) general.entries.splice(idx + 1, 0, def); else general.entries.unshift(def);
+          }
+        }
+      }
+      // Add Sequence Flow Condition Expression to General
+      if (isSequenceFlow(element)) {
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (general && Array.isArray(general.entries)) {
+          const exists = general.entries.some((e: any) => e && e.id === 'bpmn-conditionExpression');
+          if (!exists) {
+            // Place directly under ID
+            let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+            const def = { id: 'bpmn-conditionExpression', component: ConditionExpressionEntry, isEdited: isTextAreaEntryEdited };
+            if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
           }
         }
       }
