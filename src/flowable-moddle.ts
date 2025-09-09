@@ -22,6 +22,17 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'MultiInstanceLoopCharacteristicsProps',
+      isAbstract: true,
+      // extend BPMN multi-instance loop characteristics with Flowable attributes
+      extends: [ 'bpmn:MultiInstanceLoopCharacteristics' ],
+      properties: [
+        { name: 'collection', isAttr: true, type: 'String' },
+        { name: 'elementVariable', isAttr: true, type: 'String' },
+        { name: 'elementIndexVariable', isAttr: true, type: 'String' }
+      ]
+    },
+    {
       name: 'ServiceTaskProps',
       isAbstract: true,
       extends: [ 'bpmn:ServiceTask' ],

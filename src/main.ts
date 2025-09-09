@@ -174,6 +174,7 @@ function customizeProviders() {
     const replaceMenuProvider = injector.get('replaceMenuProvider', false);
     if (replaceMenuProvider && typeof replaceMenuProvider.getEntries === 'function') {
       const originalReplaceEntries = replaceMenuProvider.getEntries.bind(replaceMenuProvider);
+      const originalGetHeaderEntries = (replaceMenuProvider as any).getHeaderEntries && (replaceMenuProvider as any).getHeaderEntries.bind(replaceMenuProvider);
       replaceMenuProvider.getEntries = function(element: any) {
         const entries = originalReplaceEntries(element) || [];
         return entries.filter((entry: any) => {
@@ -217,10 +218,31 @@ function customizeProviders() {
           if (/complex[- ]?gateway/i.test(id) || (/complex/i.test(label) && /gateway/i.test(label)) || /bpmn:ComplexGateway$/.test(targetType)) {
             return false;
           }
+          // Remove standard Loop toggle from Change Element menu
+          if (/toggle-loop/i.test(id) || (/\bloop\b/i.test(label) && !/multi/i.test(label))) {
+            return false;
+          }
 
           return true;
         });
       };
+
+      // Also filter header toggles (icons row in the dialog)
+      if (typeof (replaceMenuProvider as any).getHeaderEntries === 'function' && originalGetHeaderEntries) {
+        (replaceMenuProvider as any).getHeaderEntries = function(element: any) {
+          const entries = originalGetHeaderEntries(element) || [];
+          // entries are array-like header items with id/className/title
+          return entries.filter((e: any) => {
+            const id = String((e && e.id) || '');
+            const title = String((e && (e.title || e.label)) || '');
+            const cls = String((e && e.className) || '');
+            if (/toggle-loop/i.test(id)) return false;
+            if (/\bloop\b/i.test(title) && !/multi/i.test(title)) return false;
+            if (/loop/i.test(cls) && !/multi/i.test(cls)) return false;
+            return true;
+          });
+        };
+      }
     }
 
     // Popup menu filter (Create/Append search menu)

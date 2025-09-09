@@ -101,6 +101,51 @@ function ExclusiveLeaveEntry(props: { element: BPMNElement }) {
   return CheckboxEntry({ id: 'flowable-asyncLeaveExclusive', element, label: translate ? translate('Leave exclusive') : 'Leave exclusive', getValue, setValue });
 }
 
+// Multi-Instance: Flowable collection
+function FlowableCollectionEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const loop = element && element.businessObject && element.businessObject.loopCharacteristics;
+  const getValue = () => (loop && loop.get && loop.get('flowable:collection')) || '';
+  const setValue = (value: string) => {
+    if (!loop) return;
+    modeling.updateModdleProperties(element, loop, { 'flowable:collection': value || undefined });
+  };
+  return TextFieldEntry({ id: 'flowable-collection', element, label: translate ? translate('Collection') : 'Collection', getValue, setValue, debounce });
+}
+
+// Multi-Instance: Flowable element variable
+function FlowableElementVariableEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const loop = element && element.businessObject && element.businessObject.loopCharacteristics;
+  const getValue = () => (loop && loop.get && loop.get('flowable:elementVariable')) || '';
+  const setValue = (value: string) => {
+    if (!loop) return;
+    modeling.updateModdleProperties(element, loop, { 'flowable:elementVariable': value || undefined });
+  };
+  return TextFieldEntry({ id: 'flowable-elementVariable', element, label: translate ? translate('Element variable') : 'Element variable', getValue, setValue, debounce });
+}
+
+// Multi-Instance: Flowable element index variable
+function FlowableElementIndexVariableEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const loop = element && element.businessObject && element.businessObject.loopCharacteristics;
+  const getValue = () => (loop && loop.get && loop.get('flowable:elementIndexVariable')) || '';
+  const setValue = (value: string) => {
+    if (!loop) return;
+    modeling.updateModdleProperties(element, loop, { 'flowable:elementIndexVariable': value || undefined });
+  };
+  return TextFieldEntry({ id: 'flowable-elementIndexVariable', element, label: translate ? translate('Element index variable') : 'Element index variable', getValue, setValue, debounce });
+}
+
 function createExecutionGroup(element: BPMNElement) {
   // Desired order:
   // Asynchronous, Exclusive, Leave asynchronously, Leave exclusive
@@ -136,6 +181,33 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             if (idx >= 0) general.entries.splice(idx + 1, 0, def); else general.entries.unshift(def);
           }
         }
+      }
+      // Add Flowable fields to Multi-Instance section
+      const bo = element && element.businessObject;
+      const loop = bo && bo.loopCharacteristics;
+      const miGroup = groups && groups.find((g) => g && (g.id === 'multiInstance' || g.id === 'multiInstanceGroup'));
+      if (loop && (miGroup && Array.isArray(miGroup.entries))) {
+        const want = [
+          { id: 'flowable-collection', component: FlowableCollectionEntry },
+          { id: 'flowable-elementVariable', component: FlowableElementVariableEntry },
+          { id: 'flowable-elementIndexVariable', component: FlowableElementIndexVariableEntry }
+        ];
+        want.forEach((def) => {
+          const exists = miGroup.entries.some((e: any) => e && e.id === def.id);
+          if (!exists) {
+            miGroup.entries.push({ ...def, isEdited: isTextFieldEntryEdited });
+          }
+        });
+        try { console.debug && console.debug('[FlowableProvider] added MI entries to Multi-Instance group'); } catch (e) {}
+      } else if (loop) {
+        // Fallback: if built-in group not found, add our own MI group with these entries
+        const entries: any[] = [
+          { id: 'flowable-collection', component: FlowableCollectionEntry, isEdited: isTextFieldEntryEdited },
+          { id: 'flowable-elementVariable', component: FlowableElementVariableEntry, isEdited: isTextFieldEntryEdited },
+          { id: 'flowable-elementIndexVariable', component: FlowableElementIndexVariableEntry, isEdited: isTextFieldEntryEdited }
+        ];
+        groups.push({ id: 'flowable-multiInstance', label: 'Multi-Instance', entries, component: Group });
+        try { console.debug && console.debug('[FlowableProvider] added fallback MI group'); } catch (e) {}
       }
       if (isActivityLike(element) || isStartOrEndEvent(element)) {
         groups.push(createExecutionGroup(element));
