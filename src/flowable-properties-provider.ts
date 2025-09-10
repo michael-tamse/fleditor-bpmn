@@ -257,6 +257,24 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
   this.getGroups = function(element: BPMNElement) {
     return function(groups: any[]) {
       try { console.debug && console.debug('[FlowableProvider] getGroups for', getType(element), 'groups in:', groups && groups.length); } catch (e) {}
+      // Helper: ensure a visual separator in General after ID if extra fields exist
+      const ensureGeneralSeparator = () => {
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (!(general && Array.isArray(general.entries))) return;
+        const hasSeparator = general.entries.some((e: any) => e && e.id === 'general-spacer-1');
+        if (hasSeparator) return;
+        // Detect if there are entries besides name and id
+        const hasExtra = general.entries.some((e: any) => {
+          const id = e && e.id;
+          return id && id !== 'name' && id !== 'id';
+        });
+        if (!hasExtra) return;
+        // Insert separator just after the ID field if present, else after Name
+        let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+        if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+        if (insertAfterIdx < 0) return;
+        general.entries.splice(insertAfterIdx + 1, 0, { id: 'general-spacer-1', component: SpacerEntry });
+      };
       // Add Flowable Service Task "Delegate expression" field to General
       if (isServiceTask(element)) {
         const general = groups && groups.find((g) => g && g.id === 'general');
@@ -282,6 +300,8 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           }
         }
       }
+      // Ensure General separator presence if extra fields exist beyond Name and ID
+      ensureGeneralSeparator();
       // Add Flowable fields to Multi-Instance section
       const bo = element && element.businessObject;
       const loop = bo && bo.loopCharacteristics;
