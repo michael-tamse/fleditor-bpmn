@@ -14,6 +14,7 @@ const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
 let modeler: any;
+let isImporting = false;
 
 function setStatus(msg?: string) {
   if (!statusEl) return;
@@ -41,12 +42,34 @@ function initModeler() {
     }
   } catch (e) {}
 
+  // Persist defaults for CallActivity on creation, avoid during import
+  try {
+    const eventBus = modeler.get('eventBus');
+    const modeling = modeler.get('modeling');
+    if (eventBus && modeling) {
+      eventBus.on('import.render.start', () => { isImporting = true; });
+      eventBus.on('import.done', () => { isImporting = false; });
+      eventBus.on('shape.added', (e: any) => {
+        if (isImporting) return;
+        const el = e && e.element;
+        const bo = el && el.businessObject;
+        if (bo && bo.$type === 'bpmn:CallActivity') {
+          const has = typeof (bo.get ? bo.get('flowable:inheritBusinessKey') : (bo as any)['flowable:inheritBusinessKey']) !== 'undefined';
+          if (!has) {
+            try { modeling.updateProperties(el, { 'flowable:inheritBusinessKey': true }); } catch {}
+          }
+        }
+      });
+    }
+  } catch {}
+
   customizeProviders();
   createNew();
 
   modeler.on('import.done', () => {
     sanitizeModel();
     migrateAsyncFlags();
+    ensureCallActivityDefaults();
   });
 }
 
@@ -340,6 +363,8 @@ function triggerOpen() {
 
 async function saveXML() {
   try {
+    // Persist defaults before export
+    ensureCallActivityDefaults();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
     download('diagram.bpmn', withCdata, 'application/xml');
@@ -457,6 +482,28 @@ function migrateAsyncFlags() {
     });
   } catch (e) {
     console.warn('Migration async flags failed:', e);
+  }
+}
+
+// Persist default flowable:inheritBusinessKey="true" on CallActivity if missing
+function ensureCallActivityDefaults() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    if (!elementRegistry || !modeling) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:CallActivity' || !bo.get) return;
+      const has = typeof bo.get('flowable:inheritBusinessKey') !== 'undefined';
+      if (!has) {
+        try { modeling.updateProperties(el, { 'flowable:inheritBusinessKey': true }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureCallActivityDefaults failed:', e);
   }
 }
 

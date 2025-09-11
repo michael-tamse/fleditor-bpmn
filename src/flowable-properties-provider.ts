@@ -22,6 +22,10 @@ function isServiceTask(element: BPMNElement): boolean {
   return /ServiceTask$/.test(getType(element));
 }
 
+function isCallActivity(element: BPMNElement): boolean {
+  return /CallActivity$/.test(getType(element));
+}
+
 function isSequenceFlow(element: BPMNElement): boolean {
   return /SequenceFlow$/.test(getType(element));
 }
@@ -135,6 +139,65 @@ function SpacerEntry() {
       paddingTop: '8px'
     }
   } as any);
+}
+
+// CallActivity: Process reference (calledElement)
+function CalledElementEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => (bo && (bo.get ? bo.get('calledElement') : bo.calledElement)) || '';
+  const setValue = (value: string) => {
+    const updates: any = {
+      calledElement: (value || '').trim() || undefined,
+      'flowable:sameDeployment': true,
+      'flowable:fallbackToDefaultTenant': true
+    };
+    modeling.updateProperties(element, updates);
+  };
+  return TextFieldEntry({ id: 'bpmn-calledElement', element, label: translate ? translate('Process reference') : 'Process reference', getValue, setValue, debounce });
+}
+
+// CallActivity: Flowable business key
+function BusinessKeyEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => (bo.get && bo.get('flowable:businessKey')) || '';
+  const setValue = (value: string) => {
+    const updates: any = {
+      'flowable:businessKey': (value || '').trim() || undefined,
+      'flowable:sameDeployment': true,
+      'flowable:fallbackToDefaultTenant': true
+    };
+    modeling.updateProperties(element, updates);
+  };
+  return TextFieldEntry({ id: 'flowable-businessKey', element, label: translate ? translate('Business key') : 'Business key', getValue, setValue, debounce });
+}
+
+// CallActivity: Inherit business key (maps to flowable:inheritBusinessKey)
+function InheritBusinessKeyEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => {
+    const v = bo && (bo.get ? bo.get('flowable:inheritBusinessKey') : (bo as any)['flowable:inheritBusinessKey']);
+    return typeof v === 'boolean' ? v : true;
+  };
+  const setValue = (value: boolean) => {
+    const updates: any = {
+      'flowable:inheritBusinessKey': !!value,
+      'flowable:sameDeployment': true,
+      'flowable:fallbackToDefaultTenant': true
+    };
+    modeling.updateProperties(element, updates);
+  };
+  return CheckboxEntry({ id: 'flowable-inheritBusinessKey', element, label: translate ? translate('Inherit business key') : 'Inherit business key', getValue, setValue });
 }
 
 // Multi-Instance: Flowable collection
@@ -298,6 +361,30 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             const def = { id: 'bpmn-conditionExpression', component: ConditionExpressionEntry, isEdited: isTextAreaEntryEdited };
             if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
           }
+        }
+      }
+      // Add CallActivity fields to General
+      if (isCallActivity(element)) {
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (general && Array.isArray(general.entries)) {
+          // Inject in order directly after ID: Process reference, Business key, Inherit business key
+          const want: any[] = [
+            { id: 'bpmn-calledElement', component: CalledElementEntry, isEdited: isTextFieldEntryEdited },
+            { id: 'flowable-businessKey', component: BusinessKeyEntry, isEdited: isTextFieldEntryEdited },
+            { id: 'flowable-inheritBusinessKey', component: InheritBusinessKeyEntry, isEdited: isCheckboxEntryEdited }
+          ];
+          // ensure not duplicated and insert in correct order
+          let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+          if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+          let offset = 1;
+          want.forEach((def) => {
+            const exists = general.entries.some((e: any) => e && e.id === def.id);
+            if (!exists) {
+              const idx = insertAfterIdx >= 0 ? (insertAfterIdx + offset) : 0;
+              general.entries.splice(idx, 0, def);
+              offset += 1;
+            }
+          });
         }
       }
       // Ensure General separator presence if extra fields exist beyond Name and ID

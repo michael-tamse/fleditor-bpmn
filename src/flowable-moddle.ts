@@ -33,6 +33,23 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'CallActivityProps',
+      isAbstract: true,
+      // extend BPMN CallActivity with Flowable attributes
+      extends: [ 'bpmn:CallActivity' ],
+      properties: [
+        // Business key expression/string
+        { name: 'businessKey', isAttr: true, type: 'String' },
+        // Inherit business key (UI binds here)
+        { name: 'inheritBusinessKey', isAttr: true, type: 'Boolean' },
+        // Future use
+        { name: 'inheritVariables', isAttr: true, type: 'Boolean' },
+        // Persisted defaults (no UI)
+        { name: 'sameDeployment', isAttr: true, type: 'Boolean' },
+        { name: 'fallbackToDefaultTenant', isAttr: true, type: 'Boolean' }
+      ]
+    },
+    {
       name: 'ServiceTaskProps',
       isAbstract: true,
       extends: [ 'bpmn:ServiceTask' ],
