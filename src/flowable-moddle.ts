@@ -50,6 +50,28 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'In',
+      // flowable:in used in extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'sourceExpression', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'Out',
+      // flowable:out used in extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'sourceExpression', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
       name: 'ServiceTaskProps',
       isAbstract: true,
       extends: [ 'bpmn:ServiceTask' ],

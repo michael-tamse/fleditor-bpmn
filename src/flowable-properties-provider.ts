@@ -1,4 +1,4 @@
-import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited, TextAreaEntry, isTextAreaEntryEdited } from '@bpmn-io/properties-panel';
+import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited, TextAreaEntry, isTextAreaEntryEdited, ListGroup, SelectEntry, isSelectEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
 import { h } from '@bpmn-io/properties-panel/preact';
 
@@ -139,6 +139,190 @@ function SpacerEntry() {
       paddingTop: '8px'
     }
   } as any);
+}
+
+// ------------- Call Activity In/Out mappings helpers -------------
+
+function getExtensionElements(bo: any) {
+  return (bo && (bo.get ? bo.get('extensionElements') : bo.extensionElements)) || null;
+}
+
+function getFlowableMappings(bo: any, which: 'In' | 'Out') {
+  const ext = getExtensionElements(bo);
+  const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+  const type = `flowable:${which}`;
+  const typeLower = `flowable:${String(which).toLowerCase()}`;
+  return values.filter((v: any) => {
+    const t = v && v.$type;
+    return t === type || t === typeLower;
+  });
+}
+
+function ensureExtensionElements(element: any, bo: any, bpmnFactory: any, modeling: any) {
+  let ext = getExtensionElements(bo);
+  if (!ext) {
+    ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+    modeling.updateModdleProperties(element, bo, { extensionElements: ext });
+  }
+  return ext;
+}
+
+function addFlowableMapping(element: any, which: 'In' | 'Out', bpmnFactory: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const mapping = bpmnFactory.create(`flowable:${which}`, {});
+  const newValues = values.concat([ mapping ]);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function removeFlowableMapping(element: any, mapping: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = getExtensionElements(bo);
+  if (!ext) return;
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const newValues = values.filter((v: any) => v !== mapping);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function getMappingType(mapping: any): 'source' | 'sourceExpression' {
+  // Prefer explicit UI hint if present (not serialized)
+  const uiType = (mapping as any).__flowableType;
+  if (uiType === 'source' || uiType === 'sourceExpression') return uiType;
+  // Detect by attribute presence (not truthiness)
+  const has = (name: string) => {
+    const get = (mapping.get ? mapping.get(name) : (mapping as any)[name]);
+    return typeof get !== 'undefined';
+  };
+  if (has('sourceExpression') && !has('source')) return 'sourceExpression';
+  return 'source';
+}
+
+function InOutMappingTypeEntry(props: { element: BPMNElement, id: string, mapping: any }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = () => getMappingType(mapping);
+  const setValue = (val: 'source' | 'sourceExpression') => {
+    // remember selection locally to keep the dropdown stable even if field empty
+    (mapping as any).__flowableType = val;
+    if (val === 'source') {
+      modeling.updateModdleProperties(element, mapping, { sourceExpression: undefined });
+    } else {
+      modeling.updateModdleProperties(element, mapping, { source: undefined });
+    }
+  };
+  const getOptions = () => ([
+    { label: translate ? translate('Source') : 'Source', value: 'source' },
+    { label: translate ? translate('Source expression') : 'Source expression', value: 'sourceExpression' }
+  ]);
+  return SelectEntry({ element, id, label: translate ? translate('Type') : 'Type', getValue, setValue, getOptions });
+}
+
+function InOutMappingSourceEntry(props: { element: BPMNElement, id: string, mapping: any }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => {
+    const type = getMappingType(mapping);
+    if (type === 'source') return (mapping.get ? mapping.get('source') : mapping.source) || '';
+    return (mapping.get ? mapping.get('sourceExpression') : mapping.sourceExpression) || '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim() || undefined;
+    const type = getMappingType(mapping);
+    if (type === 'source') modeling.updateModdleProperties(element, mapping, { source: v });
+    else modeling.updateModdleProperties(element, mapping, { sourceExpression: v });
+  };
+  const label = getMappingType(mapping) === 'source'
+    ? (translate ? translate('Source') : 'Source')
+    : (translate ? translate('Source expression') : 'Source expression');
+  return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
+}
+
+function InOutMappingTargetEntry(props: { element: BPMNElement, id: string, mapping: any }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (mapping.get ? mapping.get('target') : mapping.target) || '';
+  const setValue = (value: string) => {
+    modeling.updateModdleProperties(element, mapping, { target: (value || '').trim() || undefined });
+  };
+  return TextFieldEntry({ id, element, label: translate ? translate('Target') : 'Target', getValue, setValue, debounce });
+}
+
+function InMappingsGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const bo = element.businessObject;
+  const ins = getFlowableMappings(bo, 'In');
+  const items = ins.map((m: any, idx: number) => {
+    const lbl = (m.get ? m.get('target') : m.target) || '';
+    const entries = [
+      { id: `flowable-in-${idx}-type`, mapping: m, component: InOutMappingTypeEntry, isEdited: isSelectEntryEdited },
+      { id: `flowable-in-${idx}-source`, mapping: m, component: InOutMappingSourceEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-in-${idx}-target`, mapping: m, component: InOutMappingTargetEntry, isEdited: isTextFieldEntryEdited }
+    ];
+    const remove = () => removeFlowableMapping(element, m, modeling);
+    return { id: `flowable-in-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-in-${idx}-source` };
+  });
+  const add = () => addFlowableMapping(element, 'In', bpmnFactory, modeling);
+  return h(ListGroup as any, {
+    id: id,
+    label: label || (translate ? translate('In mappings') : 'In mappings'),
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+function OutMappingsGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const bo = element.businessObject;
+  const outs = getFlowableMappings(bo, 'Out');
+  const items = outs.map((m: any, idx: number) => {
+    const lbl = (m.get ? m.get('target') : m.target) || '';
+    const entries = [
+      { id: `flowable-out-${idx}-type`, mapping: m, component: InOutMappingTypeEntry, isEdited: isSelectEntryEdited },
+      { id: `flowable-out-${idx}-source`, mapping: m, component: InOutMappingSourceEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-out-${idx}-target`, mapping: m, component: InOutMappingTargetEntry, isEdited: isTextFieldEntryEdited }
+    ];
+    const remove = () => removeFlowableMapping(element, m, modeling);
+    return { id: `flowable-out-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-out-${idx}-source` };
+  });
+  const add = () => addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+  return h(ListGroup as any, {
+    id: id,
+    label: label || (translate ? translate('Out mappings') : 'Out mappings'),
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+function createInMappingsGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-in-mappings',
+    label: 'In mappings',
+    component: InMappingsGroupComponent
+  };
+}
+
+function createOutMappingsGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-out-mappings',
+    label: 'Out mappings',
+    component: OutMappingsGroupComponent
+  };
 }
 
 // CallActivity: Process reference (calledElement)
@@ -385,6 +569,22 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
               offset += 1;
             }
           });
+        }
+        // Insert In/Out mappings groups after General
+        const existingIn = groups.some((g: any) => g && g.id === 'flowable-in-mappings');
+        const existingOut = groups.some((g: any) => g && g.id === 'flowable-out-mappings');
+        const insertAt = groups.findIndex((g: any) => g && g.id === 'general');
+        const inGroup = createInMappingsGroup(element);
+        const outGroup = createOutMappingsGroup(element);
+        const toInsert: any[] = [];
+        if (!existingIn) toInsert.push(inGroup);
+        if (!existingOut) toInsert.push(outGroup);
+        if (toInsert.length) {
+          if (insertAt >= 0) {
+            groups.splice(insertAt + 1, 0, ...toInsert);
+          } else {
+            groups.unshift(...toInsert);
+          }
         }
       }
       // Ensure General separator presence if extra fields exist beyond Name and ID
