@@ -54,9 +54,12 @@ function initModeler() {
         const el = e && e.element;
         const bo = el && el.businessObject;
         if (bo && bo.$type === 'bpmn:CallActivity') {
-          const has = typeof (bo.get ? bo.get('flowable:inheritBusinessKey') : (bo as any)['flowable:inheritBusinessKey']) !== 'undefined';
-          if (!has) {
-            try { modeling.updateProperties(el, { 'flowable:inheritBusinessKey': true }); } catch {}
+          const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
+          const updates: any = {};
+          if (typeof get('flowable:inheritBusinessKey') === 'undefined') updates['flowable:inheritBusinessKey'] = true;
+          if (typeof get('flowable:inheritVariables') === 'undefined') updates['flowable:inheritVariables'] = true;
+          if (Object.keys(updates).length) {
+            try { modeling.updateProperties(el, updates); } catch {}
           }
         }
       });
@@ -498,9 +501,11 @@ function ensureCallActivityDefaults() {
     all.forEach((el: any) => {
       const bo = el && el.businessObject;
       if (!bo || bo.$type !== 'bpmn:CallActivity' || !bo.get) return;
-      const has = typeof bo.get('flowable:inheritBusinessKey') !== 'undefined';
-      if (!has) {
-        try { modeling.updateProperties(el, { 'flowable:inheritBusinessKey': true }); } catch {}
+      const updates: any = {};
+      if (typeof bo.get('flowable:inheritBusinessKey') === 'undefined') updates['flowable:inheritBusinessKey'] = true;
+      if (typeof bo.get('flowable:inheritVariables') === 'undefined') updates['flowable:inheritVariables'] = true;
+      if (Object.keys(updates).length) {
+        try { modeling.updateProperties(el, updates); } catch {}
       }
     });
   } catch (e) {

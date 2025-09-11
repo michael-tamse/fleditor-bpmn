@@ -79,6 +79,22 @@ button:hover { border-color: #cbd5e1; background: #f1f5f9; }
 /* Optionale leichte Anpassungen für die Ränder */
 .djs-palette, .djs-context-pad { border-color: var(--border); }
 
+/* Flowable custom styles: Out mappings options */
+[data-group-id="group-flowable-out-mapping-options"] {
+  border-top: none !important;
+}
+[data-group-id="group-flowable-out-mapping-options"] .bio-properties-panel-group-entries {
+  border-top: none !important;
+  padding: 6px 12px 0 12px; /* push content 4px further down */
+  margin-bottom: -6px; /* reduce space to next divider further */
+}
+[data-group-id="group-flowable-out-mapping-options"] .bio-properties-panel-checkbox-entry {
+  margin: 0; /* even */
+  display: flex;
+  align-items: center;
+  min-height: 26px; /* 2px tighter */
+}
+
 /* bpmn.io Wasserzeichen/Logo unten rechts ausblenden */
 .bjs-powered-by,
 .bjs-powered-by a {

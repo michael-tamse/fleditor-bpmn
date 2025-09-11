@@ -1,4 +1,4 @@
-import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited, TextAreaEntry, isTextAreaEntryEdited, ListGroup, SelectEntry, isSelectEntryEdited } from '@bpmn-io/properties-panel';
+import { CheckboxEntry, Group, isCheckboxEntryEdited, TextFieldEntry, isTextFieldEntryEdited, TextAreaEntry, isTextAreaEntryEdited, ListGroup, ListEntry, SelectEntry, isSelectEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
 import { h } from '@bpmn-io/properties-panel/preact';
 
@@ -127,6 +127,17 @@ function IsForCompensationEntry(props: { element: BPMNElement }) {
   const getValue = () => !!(bo.get ? bo.get('isForCompensation') : bo.isForCompensation);
   const setValue = (value: boolean) => modeling.updateProperties(element, { isForCompensation: !!value });
   return CheckboxEntry({ id: 'bpmn-isForCompensation', element, label: translate ? translate('Is for compensation') : 'Is for compensation', getValue, setValue });
+}
+
+// CallActivity: Complete asynchronously
+function CompleteAsyncEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => !!(bo.get ? bo.get('flowable:completeAsync') : (bo as any)['flowable:completeAsync']);
+  const setValue = (value: boolean) => modeling.updateProperties(element, { 'flowable:completeAsync': !!value });
+  return CheckboxEntry({ id: 'flowable-completeAsync', element, label: translate ? translate('Complete asynchronously') : 'Complete asynchronously', getValue, setValue });
 }
 
 // Simple spacer entry to visually separate groups of entries within a group
@@ -284,6 +295,7 @@ function InMappingsGroupComponent(props: any) {
   });
 }
 
+// Out mappings as a ListGroup (only the list of mappings)
 function OutMappingsGroupComponent(props: any) {
   const { element, id, label } = props;
   const translate = useService('translate');
@@ -329,6 +341,39 @@ function createOutMappingsGroup(_element: BPMNElement) {
     label: 'Out mappings',
     component: OutMappingsGroupComponent
   };
+}
+
+// Out mappings: global option checkbox
+function UseLocalScopeForOutParametersEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => !!(bo.get ? bo.get('flowable:useLocalScopeForOutParameters') : (bo as any)['flowable:useLocalScopeForOutParameters']);
+  const setValue = (value: boolean) => {
+    modeling.updateProperties(element, { 'flowable:useLocalScopeForOutParameters': !!value });
+  };
+  return CheckboxEntry({ id: 'flowable-useLocalScopeForOutParameters', element, label: translate ? translate('Use local scope for out mapping') : 'Use local scope for out mapping', getValue, setValue });
+}
+
+// Non-collapsible, headerless group below Out mappings
+function OutMappingsOptionsComponent(props: any) {
+  const { element, id } = props;
+  return h('div', {
+    className: 'bio-properties-panel-group',
+    'data-group-id': 'group-' + id
+  } as any, [
+    h('div', { className: 'bio-properties-panel-group-entries open' } as any, [
+      h(UseLocalScopeForOutParametersEntry as any, { element })
+    ])
+  ]);
+}
+
+function createOutMappingsOptionsGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-out-mapping-options',
+    component: OutMappingsOptionsComponent
+  } as any;
 }
 
 // CallActivity: Process reference (calledElement)
@@ -388,6 +433,27 @@ function InheritBusinessKeyEntry(props: { element: BPMNElement }) {
     modeling.updateProperties(element, updates);
   };
   return CheckboxEntry({ id: 'flowable-inheritBusinessKey', element, label: translate ? translate('Inherit business key') : 'Inherit business key', getValue, setValue });
+}
+
+// CallActivity: Inherit variables (maps to flowable:inheritVariables)
+function InheritVariablesEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => {
+    const v = bo && (bo.get ? bo.get('flowable:inheritVariables') : (bo as any)['flowable:inheritVariables']);
+    return typeof v === 'boolean' ? v : true;
+  };
+  const setValue = (value: boolean) => {
+    const updates: any = {
+      'flowable:inheritVariables': !!value,
+      'flowable:sameDeployment': true,
+      'flowable:fallbackToDefaultTenant': true
+    };
+    modeling.updateProperties(element, updates);
+  };
+  return CheckboxEntry({ id: 'flowable-inheritVariables', element, label: translate ? translate('Inherit variables') : 'Inherit variables', getValue, setValue });
 }
 
 // Multi-Instance: Flowable collection
@@ -497,6 +563,10 @@ function FlowableElementIndexVariableEntry(props: { element: BPMNElement }) {
   entries.push({ id: 'execution-spacer-1', component: SpacerEntry });
   // New: Is for compensation
   entries.push({ id: 'bpmn-isForCompensation', component: IsForCompensationEntry, isEdited: isCheckboxEntryEdited });
+  // CallActivity-specific: Complete asynchronously (completion on called instance)
+  if (isCallActivity(element)) {
+    entries.push({ id: 'flowable-completeAsync', component: CompleteAsyncEntry, isEdited: isCheckboxEntryEdited });
+  }
   return {
       id: 'execution',
       label: 'Execution',
@@ -561,7 +631,8 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           const want: any[] = [
             { id: 'bpmn-calledElement', component: CalledElementEntry, isEdited: isTextFieldEntryEdited },
             { id: 'flowable-businessKey', component: BusinessKeyEntry, isEdited: isTextFieldEntryEdited },
-            { id: 'flowable-inheritBusinessKey', component: InheritBusinessKeyEntry, isEdited: isCheckboxEntryEdited }
+            { id: 'flowable-inheritBusinessKey', component: InheritBusinessKeyEntry, isEdited: isCheckboxEntryEdited },
+            { id: 'flowable-inheritVariables', component: InheritVariablesEntry, isEdited: isCheckboxEntryEdited }
           ];
           // ensure not duplicated and insert in correct order
           let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
@@ -579,18 +650,27 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         // Insert In/Out mappings groups after General
         const existingIn = groups.some((g: any) => g && g.id === 'flowable-in-mappings');
         const existingOut = groups.some((g: any) => g && g.id === 'flowable-out-mappings');
+        const existingOutOpts = groups.some((g: any) => g && g.id === 'flowable-out-mapping-options');
         const insertAt = groups.findIndex((g: any) => g && g.id === 'general');
         const inGroup = createInMappingsGroup(element);
         const outGroup = createOutMappingsGroup(element);
+        const outOptsGroup = createOutMappingsOptionsGroup(element);
         const toInsert: any[] = [];
         if (!existingIn) toInsert.push(inGroup);
         if (!existingOut) toInsert.push(outGroup);
         if (toInsert.length) {
-          if (insertAt >= 0) {
-            groups.splice(insertAt + 1, 0, ...toInsert);
-          } else {
-            groups.unshift(...toInsert);
+          if (insertAt >= 0) groups.splice(insertAt + 1, 0, ...toInsert); else groups.unshift(...toInsert);
+        }
+        // Now ensure options group visibility matches outs count
+        const outsCount = getFlowableMappings(element.businessObject, 'Out').length;
+        const idxOut = groups.findIndex((g: any) => g && g.id === 'flowable-out-mappings');
+        const idxOpts = groups.findIndex((g: any) => g && g.id === 'flowable-out-mapping-options');
+        if (outsCount > 0) {
+          if (idxOpts < 0 && idxOut >= 0) {
+            groups.splice(idxOut + 1, 0, outOptsGroup);
           }
+        } else {
+          if (idxOpts >= 0) groups.splice(idxOpts, 1);
         }
       }
       // Ensure General separator presence if extra fields exist beyond Name and ID

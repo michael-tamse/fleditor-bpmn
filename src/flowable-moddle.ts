@@ -44,6 +44,10 @@ const flowableModdle: Record<string, any> = {
         { name: 'inheritBusinessKey', isAttr: true, type: 'Boolean' },
         // Future use
         { name: 'inheritVariables', isAttr: true, type: 'Boolean' },
+        // Execution option
+        { name: 'completeAsync', isAttr: true, type: 'Boolean' },
+        // Out mapping global option
+        { name: 'useLocalScopeForOutParameters', isAttr: true, type: 'Boolean' },
         // Persisted defaults (no UI)
         { name: 'sameDeployment', isAttr: true, type: 'Boolean' },
         { name: 'fallbackToDefaultTenant', isAttr: true, type: 'Boolean' }
