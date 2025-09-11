@@ -363,8 +363,9 @@ function triggerOpen() {
 
 async function saveXML() {
   try {
-    // Persist defaults before export
+    // Persist defaults before export and prune incomplete mappings
     ensureCallActivityDefaults();
+    pruneInvalidCallActivityMappings();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
     download('diagram.bpmn', withCdata, 'application/xml');
@@ -504,6 +505,51 @@ function ensureCallActivityDefaults() {
     });
   } catch (e) {
     console.warn('ensureCallActivityDefaults failed:', e);
+  }
+}
+
+// Remove incomplete Flowable In/Out mappings (no target or no source & no expression)
+function pruneInvalidCallActivityMappings() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+
+    const isFlowableMapping = (v: any) => {
+      const t = String(v && v.$type || '');
+      return /^flowable:(in|out)$/i.test(t);
+    };
+    const get = (o: any, key: string) => (o && (o.get ? o.get(key) : o[key]));
+    const hasText = (val: any) => !!String(val || '').trim();
+
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:CallActivity') return;
+      const ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) return;
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      if (!Array.isArray(values) || !values.length) return;
+
+      const newValues = values.filter((v: any) => {
+        if (!isFlowableMapping(v)) return true;
+        const target = get(v, 'target');
+        const source = get(v, 'source');
+        const expr = get(v, 'sourceExpression');
+        // keep only complete mappings: target AND (source XOR expression OR at least one present)
+        return hasText(target) && (hasText(source) || hasText(expr));
+      });
+
+      if (newValues.length !== values.length) {
+        try { modeling.updateModdleProperties(el, ext, { values: newValues }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('pruneInvalidCallActivityMappings failed:', e);
   }
 }
 

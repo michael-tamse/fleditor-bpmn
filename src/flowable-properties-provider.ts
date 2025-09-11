@@ -270,7 +270,10 @@ function InMappingsGroupComponent(props: any) {
     const remove = () => removeFlowableMapping(element, m, modeling);
     return { id: `flowable-in-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-in-${idx}-source` };
   });
-  const add = () => addFlowableMapping(element, 'In', bpmnFactory, modeling);
+  const add = (e?: any) => {
+    try { e && e.stopPropagation && e.stopPropagation(); } catch {}
+    addFlowableMapping(element, 'In', bpmnFactory, modeling);
+  };
   return h(ListGroup as any, {
     id: id,
     label: label || (translate ? translate('In mappings') : 'In mappings'),
@@ -298,7 +301,10 @@ function OutMappingsGroupComponent(props: any) {
     const remove = () => removeFlowableMapping(element, m, modeling);
     return { id: `flowable-out-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-out-${idx}-source` };
   });
-  const add = () => addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+  const add = (e?: any) => {
+    try { e && e.stopPropagation && e.stopPropagation(); } catch {}
+    addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+  };
   return h(ListGroup as any, {
     id: id,
     label: label || (translate ? translate('Out mappings') : 'Out mappings'),
