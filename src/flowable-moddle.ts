@@ -22,6 +22,16 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'EventCorrelationParameter',
+      // flowable:eventCorrelationParameter inside extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'name', isAttr: true, type: 'String' },
+        { name: 'value', isAttr: true, type: 'String' }
+      ]
+    },
+    {
       name: 'SendSynchronously',
       // flowable:sendSynchronously inside extensionElements (text body, prefer CDATA on export)
       isAbstract: false,
@@ -53,6 +63,17 @@ const flowableModdle: Record<string, any> = {
       properties: [
         { name: 'source', isAttr: true, type: 'String' },
         { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'EventOutParameter',
+      // flowable:eventOutParameter inside extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' },
+        { name: 'transient', isAttr: true, type: 'Boolean' }
       ]
     },
     {

@@ -26,6 +26,10 @@ function isSendTask(element: BPMNElement): boolean {
   return /SendTask$/.test(getType(element));
 }
 
+function isReceiveTask(element: BPMNElement): boolean {
+  return /ReceiveTask$/.test(getType(element));
+}
+
 function isCallActivity(element: BPMNElement): boolean {
   return /CallActivity$/.test(getType(element));
 }
@@ -415,6 +419,194 @@ function createOutboundEventMappingGroup(_element: BPMNElement) {
   } as any;
 }
 
+// ReceiveTask: Correlation parameter (single instance)
+function getEventCorrelationParameter(bo: any) {
+  const ext = getExtensionElements(bo);
+  const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+  return values.find((v: any) => v && /flowable:(eventCorrelationParameter)$/i.test(String(v.$type || '')));
+}
+
+function EventCorrelationParamNameEntry(props: { element: BPMNElement, id: string }) {
+  const { element, id } = props;
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const bo = element.businessObject;
+  const getValue = () => {
+    const p = getEventCorrelationParameter(bo);
+    return (p && (p.get ? p.get('name') : p.name)) || '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim();
+    let p = getEventCorrelationParameter(bo);
+    if (!v) {
+      if (!p) return;
+      const other = (p.get ? p.get('value') : p.value) || '';
+      if (!other) {
+        // remove whole parameter
+        const ext = getExtensionElements(bo);
+        if (!ext) return;
+        const values = (ext.get ? ext.get('values') : ext.values) || [];
+        const newValues = values.filter((x: any) => x !== p);
+        modeling.updateModdleProperties(element, ext, { values: newValues });
+      } else {
+        modeling.updateModdleProperties(element, p, { name: undefined });
+      }
+      return;
+    }
+    // ensure parameter exists
+    const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+    const values = (ext.get ? ext.get('values') : ext.values) || [];
+    if (!p) {
+      p = bpmnFactory.create('flowable:EventCorrelationParameter', { name: v });
+      modeling.updateModdleProperties(element, ext, { values: values.concat([ p ]) });
+    } else {
+      modeling.updateModdleProperties(element, p, { name: v });
+    }
+  };
+  return TextFieldEntry({ id, element, label: translate ? translate('Value') : 'Value', getValue, setValue, debounce });
+}
+
+function EventCorrelationParamValueEntry(props: { element: BPMNElement, id: string }) {
+  const { element, id } = props;
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const bo = element.businessObject;
+  const getValue = () => {
+    const p = getEventCorrelationParameter(bo);
+    return (p && (p.get ? p.get('value') : p.value)) || '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim();
+    let p = getEventCorrelationParameter(bo);
+    if (!v) {
+      if (!p) return;
+      const other = (p.get ? p.get('name') : p.name) || '';
+      if (!other) {
+        const ext = getExtensionElements(bo);
+        if (!ext) return;
+        const values = (ext.get ? ext.get('values') : ext.values) || [];
+        const newValues = values.filter((x: any) => x !== p);
+        modeling.updateModdleProperties(element, ext, { values: newValues });
+      } else {
+        modeling.updateModdleProperties(element, p, { value: undefined });
+      }
+      return;
+    }
+    const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+    const values = (ext.get ? ext.get('values') : ext.values) || [];
+    if (!p) {
+      p = bpmnFactory.create('flowable:EventCorrelationParameter', { value: v });
+      modeling.updateModdleProperties(element, ext, { values: values.concat([ p ]) });
+    } else {
+      modeling.updateModdleProperties(element, p, { value: v });
+    }
+  };
+  return TextFieldEntry({ id, element, label: translate ? translate('Parameter') : 'Parameter', getValue, setValue, debounce });
+}
+function createCorrelationParametersGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-correlation-parameters',
+    label: 'Correlation parameter',
+    entries: [
+      { id: 'flowable-eventCorr-name', component: EventCorrelationParamNameEntry, isEdited: isTextFieldEntryEdited },
+      { id: 'flowable-eventCorr-value', component: EventCorrelationParamValueEntry, isEdited: isTextFieldEntryEdited }
+    ],
+    component: Group
+  } as any;
+}
+// ReceiveTask: Inbound mapping (flowable:eventOutParameter)
+function getEventOutParameters(bo: any) {
+  const ext = getExtensionElements(bo);
+  const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+  return values.filter((v: any) => v && /flowable:(eventOutParameter)$/i.test(String(v.$type || '')));
+}
+
+function addEventOutParameter(element: any, bo: any, bpmnFactory: any, modeling: any) {
+  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const param = bpmnFactory.create('flowable:EventOutParameter', {});
+  modeling.updateModdleProperties(element, ext, { values: values.concat([ param ]) });
+}
+
+function removeEventOutParameter(element: any, param: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = getExtensionElements(bo);
+  if (!ext) return;
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const newValues = values.filter((v: any) => v !== param);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function EventOutParamSourceEntry(props: { element: BPMNElement, param: any, id: string }) {
+  const { element, param, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (param.get ? param.get('source') : param.source) || '';
+  const setValue = (value: string) => modeling.updateModdleProperties(element, param, { source: (value || '').trim() || undefined });
+  return TextFieldEntry({ id, element, label: translate ? translate('Payload from event') : 'Payload from event', getValue, setValue, debounce });
+}
+
+function EventOutParamTargetEntry(props: { element: BPMNElement, param: any, id: string }) {
+  const { element, param, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (param.get ? param.get('target') : param.target) || '';
+  const setValue = (value: string) => modeling.updateModdleProperties(element, param, { target: (value || '').trim() || undefined });
+  return TextFieldEntry({ id, element, label: translate ? translate('Map to') : 'Map to', getValue, setValue, debounce });
+}
+
+function EventOutParamTransientEntry(props: { element: BPMNElement, param: any, id: string }) {
+  const { element, param, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = () => !!(param.get ? param.get('transient') : param.transient);
+  const setValue = (checked: boolean) => modeling.updateModdleProperties(element, param, { transient: !!checked });
+  return CheckboxEntry({ id, element, label: translate ? translate('Transient') : 'Transient', getValue, setValue });
+}
+
+function InboundEventMappingGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const bo = element.businessObject;
+  const params = getEventOutParameters(bo);
+  const items = params.map((p: any, idx: number) => {
+    const lbl = (p.get ? (p.get('target') || p.get('source')) : (p.target || p.source)) || '';
+    const entries = [
+      { id: `flowable-eventOut-${idx}-source`, element, param: p, component: EventOutParamSourceEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-eventOut-${idx}-target`, element, param: p, component: EventOutParamTargetEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-eventOut-${idx}-transient`, element, param: p, component: EventOutParamTransientEntry, isEdited: isCheckboxEntryEdited }
+    ];
+    const remove = () => removeEventOutParameter(element, p, modeling);
+    return { id: `flowable-eventOut-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-eventOut-${idx}-source` };
+  });
+  const add = (e?: any) => {
+    try { e && e.stopPropagation && e.stopPropagation(); } catch {}
+    addEventOutParameter(element, bo, bpmnFactory, modeling);
+  };
+  return h(ListGroup as any, {
+    id,
+    label: label || (translate ? translate('Inbound event mapping') : 'Inbound event mapping'),
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+function createInboundEventMappingGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-inbound-event-mapping',
+    component: InboundEventMappingGroupComponent
+  } as any;
+}
 // ------------- Variable Aggregations helpers -------------
 
 function getFlowableVariableAggregations(bo: any) {
@@ -1137,6 +1329,38 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           const group = createOutboundEventMappingGroup(element);
           const idxGen = groups.findIndex((g) => g && g.id === 'general');
           if (idxGen >= 0) groups.splice(idxGen + 1, 0, group); else groups.push(group);
+        }
+      }
+      // ReceiveTask customizations
+      if (isReceiveTask(element)) {
+        // General: add Event Type under ID
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (general && Array.isArray(general.entries)) {
+          const exists = general.entries.some((e: any) => e && e.id === 'flowable-eventType');
+          if (!exists) {
+            let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+            if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+            const def = { id: 'flowable-eventType', component: EventTypeEntry, isEdited: isTextFieldEntryEdited };
+            if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
+          }
+        }
+        // Group: Correlation parameter (before Inbound mapping)
+        const existsCorr = groups && groups.some((g) => g && g.id === 'flowable-correlation-parameters');
+        if (!existsCorr) {
+          const corr = createCorrelationParametersGroup(element);
+          const idxGen = groups.findIndex((g) => g && g.id === 'general');
+          if (idxGen >= 0) groups.splice(idxGen + 1, 0, corr); else groups.push(corr);
+        }
+        // Group: Inbound event mapping after Correlation parameter (or General if no corr)
+        const existsIn = groups && groups.some((g) => g && g.id === 'flowable-inbound-event-mapping');
+        if (!existsIn) {
+          const inGroup = createInboundEventMappingGroup(element);
+          const idxCorr = groups.findIndex((g) => g && g.id === 'flowable-correlation-parameters');
+          if (idxCorr >= 0) groups.splice(idxCorr + 1, 0, inGroup);
+          else {
+            const idxGen = groups.findIndex((g) => g && g.id === 'general');
+            if (idxGen >= 0) groups.splice(idxGen + 1, 0, inGroup); else groups.push(inGroup);
+          }
         }
       }
       // Add CallActivity fields to General
