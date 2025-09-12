@@ -242,6 +242,55 @@ function getFlowableMappings(bo: any, which: 'In' | 'Out') {
   });
 }
 
+// ------------- Variable Aggregations helpers -------------
+
+function getFlowableVariableAggregations(bo: any) {
+  const ext = getExtensionElements(bo);
+  const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+  return values.filter((v: any) => {
+    const t = v && v.$type;
+    return t === 'flowable:VariableAggregation' || t === 'flowable:variableAggregation';
+  });
+}
+
+function addVariableAggregation(element: any, bpmnFactory: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const agg = bpmnFactory.create('flowable:VariableAggregation', {});
+  const newValues = values.concat([ agg ]);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function removeVariableAggregation(element: any, agg: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = getExtensionElements(bo);
+  if (!ext) return;
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const newValues = values.filter((v: any) => v !== agg);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function getAggregationDefinitions(agg: any) {
+  return (agg && (agg.get ? agg.get('definitions') : agg.definitions)) || [];
+}
+
+function addAggregationDefinition(element: any, agg: any, bpmnFactory: any, modeling: any, moddle?: any) {
+  const defs = getAggregationDefinitions(agg);
+  // Create unqualified <variable /> element (no namespace prefix)
+  const def: any = (moddle && (moddle as any).createAny)
+    ? (moddle as any).createAny('variable', null, {})
+    : bpmnFactory.create('flowable:Variable', {});
+  const newDefs = defs.concat([ def ]);
+  modeling.updateModdleProperties(element, agg, { definitions: newDefs });
+}
+
+function removeAggregationDefinition(element: any, agg: any, def: any, modeling: any) {
+  const defs = getAggregationDefinitions(agg);
+  const newDefs = defs.filter((d: any) => d !== def);
+  modeling.updateModdleProperties(element, agg, { definitions: newDefs });
+}
+
 function ensureExtensionElements(element: any, bo: any, bpmnFactory: any, modeling: any) {
   let ext = getExtensionElements(bo);
   if (!ext) {
@@ -335,6 +384,179 @@ function InOutMappingTargetEntry(props: { element: BPMNElement, id: string, mapp
     modeling.updateModdleProperties(element, mapping, { target: (value || '').trim() || undefined });
   };
   return TextFieldEntry({ id, element, label: translate ? translate('Target') : 'Target', getValue, setValue, debounce });
+}
+
+// Variable Aggregations UI
+function VariableAggregationTargetEntry(props: { element: BPMNElement, aggregation: any, id: string }) {
+  const { element, aggregation, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (aggregation.get ? aggregation.get('target') : aggregation.target) || '';
+  const setValue = (value: string) => modeling.updateModdleProperties(element, aggregation, { target: (value || '').trim() || undefined });
+  const label = translate ? translate('Target (Variable / Expression)') : 'Target (Variable / Expression)';
+  return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
+}
+
+type VarAggCreationMode = 'default' | 'overview' | 'transient';
+
+function VariableAggregationCreationModeEntry(props: { element: BPMNElement, aggregation: any, id: string }) {
+  const { element, aggregation, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = (): VarAggCreationMode => {
+    const overview = !!(aggregation.get ? aggregation.get('createOverviewVariable') : aggregation.createOverviewVariable);
+    const transient = !!(aggregation.get ? aggregation.get('storeAsTransientVariable') : aggregation.storeAsTransientVariable);
+    if (overview) return 'overview';
+    if (transient) return 'transient';
+    return 'default';
+  };
+  const setValue = (val: VarAggCreationMode) => {
+    const updates: any = {
+      createOverviewVariable: undefined,
+      storeAsTransientVariable: undefined
+    };
+    if (val === 'overview') updates.createOverviewVariable = true;
+    if (val === 'transient') updates.storeAsTransientVariable = true;
+    modeling.updateModdleProperties(element, aggregation, updates);
+  };
+  const getOptions = () => ([
+    { label: translate ? translate('Default') : 'Default', value: 'default' },
+    { label: translate ? translate('Create overview variable') : 'Create overview variable', value: 'overview' },
+    { label: translate ? translate('Store as transient variable') : 'Store as transient variable', value: 'transient' }
+  ]);
+  const label = translate ? translate('Target variable creation') : 'Target variable creation';
+  return SelectEntry({ element, id, label, getValue, setValue, getOptions });
+}
+
+function AggregationDefinitionSourceEntry(props: { element: BPMNElement, aggregation: any, def: any, id: string }) {
+  const { element, aggregation, def, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => {
+    if (def && typeof def.get === 'function') {
+      const v = def.get('source') ?? def.get('variableSource');
+      return v || '';
+    }
+    const a = (def && def.$attrs) || {};
+    return a.source ?? def?.source ?? def?.variableSource ?? '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim() || undefined;
+    if (def && typeof def.get === 'function') {
+      modeling.updateModdleProperties(element, def, { source: v, variableSource: undefined });
+    } else {
+      const attrs = { ...(def.$attrs || {}) };
+      if (typeof v === 'undefined') delete attrs.source; else attrs.source = v;
+      if ('variableSource' in attrs) delete (attrs as any).variableSource;
+      modeling.updateModdleProperties(element, def, { $attrs: attrs });
+    }
+  };
+  const label = translate ? translate('Source (Variable / Expression)') : 'Source (Variable / Expression)';
+  return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
+}
+
+function AggregationDefinitionTargetEntry(props: { element: BPMNElement, aggregation: any, def: any, id: string }) {
+  const { element, aggregation, def, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => {
+    if (def && typeof def.get === 'function') {
+      const v = def.get('target') ?? def.get('variableTarget');
+      return v || '';
+    }
+    const a = (def && def.$attrs) || {};
+    return a.target ?? def?.target ?? def?.variableTarget ?? '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim() || undefined;
+    if (def && typeof def.get === 'function') {
+      modeling.updateModdleProperties(element, def, { target: v, variableTarget: undefined });
+    } else {
+      const attrs = { ...(def.$attrs || {}) };
+      if (typeof v === 'undefined') delete attrs.target; else attrs.target = v;
+      if ('variableTarget' in attrs) delete (attrs as any).variableTarget;
+      modeling.updateModdleProperties(element, def, { $attrs: attrs });
+    }
+  };
+  const label = translate ? translate('Target (Variable / Expression)') : 'Target (Variable / Expression)';
+  return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
+}
+
+function AggregationDefinitionsListEntry(props: { element: BPMNElement, aggregation: any, id: string, label?: string }) {
+  const { element, aggregation, id } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const moddle = useService('moddle');
+  const defs = getAggregationDefinitions(aggregation);
+  const items = defs.map((d: any, idx: number) => {
+    const entries = [
+      { id: `${id}-${idx}-source`, element, aggregation, def: d, component: AggregationDefinitionSourceEntry, isEdited: isTextFieldEntryEdited },
+      { id: `${id}-${idx}-target`, element, aggregation, def: d, component: AggregationDefinitionTargetEntry, isEdited: isTextFieldEntryEdited }
+    ];
+    let label = '';
+    if (d && typeof d.get === 'function') {
+      label = d.get('target') || d.get('source') || d.get('variableTarget') || d.get('variableSource') || '';
+    } else {
+      const a = (d && d.$attrs) || {};
+      label = a.target || a.source || d?.target || d?.source || d?.variableTarget || d?.variableSource || '';
+    }
+    const remove = () => removeAggregationDefinition(element, aggregation, d, modeling);
+    return { id: `${id}-item-${idx}`, label, entries, remove, autoFocusEntry: `${id}-${idx}-source` };
+  });
+  const add = (e?: any) => {
+    try { e && e.stopPropagation && e.stopPropagation(); } catch {}
+    addAggregationDefinition(element, aggregation, bpmnFactory, modeling, moddle);
+  };
+  return h(ListGroup as any, {
+    id,
+    label: translate ? translate('Definitions') : 'Definitions',
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+function VariableAggregationsGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const bo = element.businessObject;
+  const aggs = getFlowableVariableAggregations(bo);
+  const items = aggs.map((a: any, idx: number) => {
+    const lbl = (a.get ? a.get('target') : a.target) || (translate ? translate('Variable aggregation') : 'Variable aggregation');
+    const entries = [
+      { id: `flowable-varAgg-${idx}-target`, element, aggregation: a, component: VariableAggregationTargetEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-varAgg-${idx}-mode`, element, aggregation: a, component: VariableAggregationCreationModeEntry, isEdited: isSelectEntryEdited },
+      { id: `flowable-varAgg-${idx}-defs`, element, aggregation: a, component: AggregationDefinitionsListEntry }
+    ];
+    const remove = () => removeVariableAggregation(element, a, modeling);
+    return { id: `flowable-varAgg-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-varAgg-${idx}-target` };
+  });
+  const add = (e?: any) => {
+    try { e && e.stopPropagation && e.stopPropagation(); } catch {}
+    addVariableAggregation(element, bpmnFactory, modeling);
+  };
+  return h(ListGroup as any, {
+    id: id,
+    label: label || (translate ? translate('Variable aggregations') : 'Variable aggregations'),
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+function createVariableAggregationsGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-variable-aggregations',
+    component: VariableAggregationsGroupComponent
+  } as any;
 }
 
 function InMappingsGroupComponent(props: any) {
@@ -813,6 +1035,15 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         ];
         groups.push({ id: 'flowable-multiInstance', label: 'Multi-Instance', entries, component: Group });
         try { console.debug && console.debug('[FlowableProvider] added fallback MI group'); } catch (e) {}
+      }
+      // Variable aggregations group: show only if MI present, insert after MI group
+      if (loop) {
+        const vaGroupExists = groups && groups.some((g) => g && g.id === 'flowable-variable-aggregations');
+        if (!vaGroupExists) {
+          const vaGroup = createVariableAggregationsGroup(element);
+          const idxMi = groups.findIndex((g) => g && (g.id === 'multiInstance' || g.id === 'multiInstanceGroup' || g.id === 'flowable-multiInstance'));
+          if (idxMi >= 0) groups.splice(idxMi + 1, 0, vaGroup); else groups.push(vaGroup);
+        }
       }
       if (isEngineExecutedTask(element)) {
         groups.push(createExecutionGroup(element));

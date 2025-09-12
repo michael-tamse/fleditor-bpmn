@@ -85,6 +85,40 @@ const flowableModdle: Record<string, any> = {
         { name: 'topic', isAttr: true, type: 'String' },
         { name: 'type', isAttr: true, type: 'String' }
       ]
+    },
+    {
+      name: 'VariableAggregation',
+      // flowable:variableAggregation inside extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'target', isAttr: true, type: 'String' },
+        { name: 'createOverviewVariable', isAttr: true, type: 'Boolean' },
+        { name: 'storeAsTransientVariable', isAttr: true, type: 'Boolean' },
+        // accept any Element children (supports both flowable:variable and legacy flowable:variableAggregationDefinition)
+        { name: 'definitions', isMany: true, type: 'Element' }
+      ]
+    },
+    {
+      name: 'Variable',
+      // flowable:variable as nested child (preferred)
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        // Source/Target variable or expression (no prefix)
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'VariableAggregationDefinition',
+      // legacy: flowable:variableAggregationDefinition (read support)
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' }
+      ]
     }
   ]
 };
