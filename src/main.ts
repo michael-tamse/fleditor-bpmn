@@ -343,7 +343,9 @@ async function openFile(file: File) {
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
-      await modeler.importXML((e.target as FileReader).result as string);
+      const raw = (e.target as FileReader).result as string;
+      const pre = prefixVariableChildrenForImport(raw);
+      await modeler.importXML(pre);
       sanitizeModel();
       modeler.get('canvas').zoom('fit-viewport', 'auto');
       setStatus(`Geladen: ${file.name}`);
@@ -371,7 +373,8 @@ async function saveXML() {
     pruneInvalidCallActivityMappings();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
-    download('diagram.bpmn', withCdata, 'application/xml');
+    const withFlowableHeader = toFlowableDefinitionHeader(withCdata);
+    download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
     console.error(err);
@@ -416,6 +419,74 @@ function wrapConditionExpressionsInCDATA(xml: string): string {
         .replace(/&amp;/g, '&');
       return `${open}<![CDATA[${unescaped}]]>${close}`;
     });
+  } catch {
+    return xml;
+  }
+}
+
+// Prefix unqualified <variable> children inside <flowable:variableAggregation> for import,
+// so the moddle maps them to flowable:Variable. We remove the prefix again on export.
+function prefixVariableChildrenForImport(xml: string): string {
+  try {
+    const re = /(\<flowable:variableAggregation\b[\s\S]*?\>)([\s\S]*?)(\<\/flowable:variableAggregation\>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const transformed = inner
+        .replace(/<\s*variable\b/g, '<flowable:variable')
+        .replace(/<\/(\s*)variable\s*>/g, '</flowable:variable>');
+      return `${open}${transformed}${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Convert the root <definitions> to Flowable Cloud-style header and normalize DI prefixes
+function toFlowableDefinitionHeader(xml: string): string {
+  try {
+    let out = xml;
+    // Extract existing definitions id if present
+    const idMatch = out.match(/<((?:[a-zA-Z_][\w-]*:)?)definitions\b[^>]*\bid="([^"]+)"/);
+    const defId = idMatch ? idMatch[2] : 'Definitions_1';
+
+    // Build Flowable-style opening tag. Keep xmlns:bpmn to satisfy xsi:type="bpmn:*" usages inside.
+    const openTag = [
+      '<definitions',
+      'xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"',
+      'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+      'xmlns:xsd="http://www.w3.org/2001/XMLSchema"',
+      'xmlns:flowable="http://flowable.org/bpmn"',
+      'xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"',
+      'xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC"',
+      'xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI"',
+      'xmlns:design="http://flowable.org/design"',
+      // keep bpmn prefix mapping for xsi:type references
+      'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"',
+      'typeLanguage="http://www.w3.org/2001/XMLSchema"',
+      'expressionLanguage="http://www.w3.org/1999/XPath"',
+      'targetNamespace="http://flowable.org/test"',
+      'exporter="Flowable Design"',
+      'exporterVersion="2025.1.02"',
+      'design:palette="flowable-work-process-palette"',
+      `id="${defId}">`
+    ].join(' ');
+
+    // Replace opening <definitions ...>
+    out = out.replace(/<((?:[a-zA-Z_][\w-]*:)?)definitions\b[^>]*>/, openTag);
+
+    // Replace closing tag
+    out = out.replace(/<\/((?:[a-zA-Z_][\w-]*:)?)definitions>/, '</definitions>');
+
+    // Normalize DC/DI prefixes to omgdc/omgdi to match Flowable header
+    out = out.replace(/<\/?dc:/g, (m) => m.replace('dc:', 'omgdc:'))
+             .replace(/<\/?di:/g, (m) => m.replace('di:', 'omgdi:'));
+
+    // Strip bpmn: prefix from all BPMN element tags (keep attributes like xsi:type="bpmn:*")
+    out = out.replace(/<\/?bpmn:([A-Za-z_][\w.-]*)/g, (m, name) => `${m.startsWith('</') ? '</' : '<'}${name}`);
+
+    // Also strip flowable: prefix from <flowable:variable> to be <variable>
+    out = out.replace(/<\/?flowable:variable\b/g, (m) => m.replace('flowable:variable', 'variable'));
+
+    return out;
   } catch {
     return xml;
   }

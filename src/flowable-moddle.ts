@@ -95,8 +95,8 @@ const flowableModdle: Record<string, any> = {
         { name: 'target', isAttr: true, type: 'String' },
         { name: 'createOverviewVariable', isAttr: true, type: 'Boolean' },
         { name: 'storeAsTransientVariable', isAttr: true, type: 'Boolean' },
-        // accept any Element children (supports both flowable:variable and legacy flowable:variableAggregationDefinition)
-        { name: 'definitions', isMany: true, type: 'Element' }
+        // Typed children for definitions; unprefixed <variable> are prefixed on import
+        { name: 'definitions', isMany: true, type: 'flowable:Variable' }
       ]
     },
     {

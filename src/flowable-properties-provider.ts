@@ -245,6 +245,7 @@ function getFlowableMappings(bo: any, which: 'In' | 'Out') {
 // ------------- Variable Aggregations helpers -------------
 
 function getFlowableVariableAggregations(bo: any) {
+  if (!bo) return [];
   const ext = getExtensionElements(bo);
   const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
   return values.filter((v: any) => {
@@ -253,18 +254,18 @@ function getFlowableVariableAggregations(bo: any) {
   });
 }
 
-function addVariableAggregation(element: any, bpmnFactory: any, modeling: any) {
-  const bo = element.businessObject;
-  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+function addVariableAggregation(element: any, loopBo: any, bpmnFactory: any, modeling: any) {
+  if (!loopBo) return;
+  const ext = ensureExtensionElements(element, loopBo, bpmnFactory, modeling);
   const values = (ext.get ? ext.get('values') : ext.values) || [];
   const agg = bpmnFactory.create('flowable:VariableAggregation', {});
   const newValues = values.concat([ agg ]);
   modeling.updateModdleProperties(element, ext, { values: newValues });
 }
 
-function removeVariableAggregation(element: any, agg: any, modeling: any) {
-  const bo = element.businessObject;
-  const ext = getExtensionElements(bo);
+function removeVariableAggregation(element: any, loopBo: any, agg: any, modeling: any) {
+  if (!loopBo) return;
+  const ext = getExtensionElements(loopBo);
   if (!ext) return;
   const values = (ext.get ? ext.get('values') : ext.values) || [];
   const newValues = values.filter((v: any) => v !== agg);
@@ -272,21 +273,21 @@ function removeVariableAggregation(element: any, agg: any, modeling: any) {
 }
 
 function getAggregationDefinitions(agg: any) {
-  return (agg && (agg.get ? agg.get('definitions') : agg.definitions)) || [];
+  if (!agg) return [];
+  return (agg.get ? agg.get('definitions') : agg.definitions) || [];
 }
 
-function addAggregationDefinition(element: any, agg: any, bpmnFactory: any, modeling: any, moddle?: any) {
+function addAggregationDefinition(element: any, agg: any, bpmnFactory: any, modeling: any) {
   const defs = getAggregationDefinitions(agg);
-  // Create unqualified <variable /> element (no namespace prefix)
-  const def: any = (moddle && (moddle as any).createAny)
-    ? (moddle as any).createAny('variable', null, {})
-    : bpmnFactory.create('flowable:Variable', {});
+  // Create typed flowable:Variable for robust moddle updates; we convert to <variable> on export
+  const def: any = bpmnFactory.create('flowable:Variable', {});
   const newDefs = defs.concat([ def ]);
   modeling.updateModdleProperties(element, agg, { definitions: newDefs });
 }
 
 function removeAggregationDefinition(element: any, agg: any, def: any, modeling: any) {
-  const defs = getAggregationDefinitions(agg);
+  if (!agg) return;
+  const defs = (agg.get ? agg.get('definitions') : agg.definitions) || [];
   const newDefs = defs.filter((d: any) => d !== def);
   modeling.updateModdleProperties(element, agg, { definitions: newDefs });
 }
@@ -490,7 +491,6 @@ function AggregationDefinitionsListEntry(props: { element: BPMNElement, aggregat
   const translate = useService('translate');
   const bpmnFactory = useService('bpmnFactory');
   const modeling = useService('modeling');
-  const moddle = useService('moddle');
   const defs = getAggregationDefinitions(aggregation);
   const items = defs.map((d: any, idx: number) => {
     const entries = [
@@ -509,7 +509,7 @@ function AggregationDefinitionsListEntry(props: { element: BPMNElement, aggregat
   });
   const add = (e?: any) => {
     try { e && e.stopPropagation && e.stopPropagation(); } catch {}
-    addAggregationDefinition(element, aggregation, bpmnFactory, modeling, moddle);
+    addAggregationDefinition(element, aggregation, bpmnFactory, modeling);
   };
   return h(ListGroup as any, {
     id,
@@ -527,7 +527,11 @@ function VariableAggregationsGroupComponent(props: any) {
   const bpmnFactory = useService('bpmnFactory');
   const modeling = useService('modeling');
   const bo = element.businessObject;
-  const aggs = getFlowableVariableAggregations(bo);
+  const loop = bo && bo.loopCharacteristics;
+  // Prefer variableAggregations on the loopCharacteristics; fallback to element-level (legacy)
+  const primaryAggs = getFlowableVariableAggregations(loop);
+  const legacyAggs = getFlowableVariableAggregations(bo);
+  const aggs = (primaryAggs && primaryAggs.length ? primaryAggs : legacyAggs) || [];
   const items = aggs.map((a: any, idx: number) => {
     const lbl = (a.get ? a.get('target') : a.target) || (translate ? translate('Variable aggregation') : 'Variable aggregation');
     const entries = [
@@ -535,12 +539,12 @@ function VariableAggregationsGroupComponent(props: any) {
       { id: `flowable-varAgg-${idx}-mode`, element, aggregation: a, component: VariableAggregationCreationModeEntry, isEdited: isSelectEntryEdited },
       { id: `flowable-varAgg-${idx}-defs`, element, aggregation: a, component: AggregationDefinitionsListEntry }
     ];
-    const remove = () => removeVariableAggregation(element, a, modeling);
+    const remove = () => removeVariableAggregation(element, loop || bo, a, modeling);
     return { id: `flowable-varAgg-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-varAgg-${idx}-target` };
   });
   const add = (e?: any) => {
     try { e && e.stopPropagation && e.stopPropagation(); } catch {}
-    addVariableAggregation(element, bpmnFactory, modeling);
+    addVariableAggregation(element, loop || bo, bpmnFactory, modeling);
   };
   return h(ListGroup as any, {
     id: id,
