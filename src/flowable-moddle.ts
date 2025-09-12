@@ -22,6 +22,40 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'SendSynchronously',
+      // flowable:sendSynchronously inside extensionElements (text body, prefer CDATA on export)
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'value', isBody: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'SystemChannel',
+      // flowable:systemChannel inside extensionElements (no attributes/body required)
+      isAbstract: false,
+      superClass: [ 'Element' ]
+    },
+    {
+      name: 'EventType',
+      // flowable:eventType inside extensionElements (text body, prefer CDATA on export)
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'value', isBody: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'EventInParameter',
+      // flowable:eventInParameter inside extensionElements
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'source', isAttr: true, type: 'String' },
+        { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
       name: 'MultiInstanceLoopCharacteristicsProps',
       isAbstract: true,
       // extend BPMN multi-instance loop characteristics with Flowable attributes

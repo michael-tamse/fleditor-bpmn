@@ -46,6 +46,7 @@ function initModeler() {
   try {
     const eventBus = modeler.get('eventBus');
     const modeling = modeler.get('modeling');
+    const bpmnReplace = modeler.get('bpmnReplace');
     if (eventBus && modeling) {
       eventBus.on('import.render.start', () => { isImporting = true; });
       eventBus.on('import.done', () => { isImporting = false; });
@@ -371,9 +372,13 @@ async function saveXML() {
     // Persist defaults before export and prune incomplete mappings
     ensureCallActivityDefaults();
     pruneInvalidCallActivityMappings();
+    ensureSystemChannelForSendTasks();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
-    const withFlowableHeader = toFlowableDefinitionHeader(withCdata);
+    const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
+    const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
+    const mappedSendTasks = mapSendTaskToServiceOnExport(withSendSyncCdata);
+    const withFlowableHeader = toFlowableDefinitionHeader(mappedSendTasks);
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -440,6 +445,60 @@ function prefixVariableChildrenForImport(xml: string): string {
   }
 }
 
+// Ensure flowable:eventType body is wrapped in CDATA
+function wrapEventTypeInCDATA(xml: string): string {
+  try {
+    const re = /(<flowable:eventType\b[^>]*>)([\s\S]*?)(<\/flowable:eventType>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      if (!trimmed) return _m;
+      return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure flowable:sendSynchronously body is wrapped in CDATA if present
+function wrapSendSynchronouslyInCDATA(xml: string): string {
+  try {
+    const re = /(<flowable:sendSynchronously\b[^>]*>)([\s\S]*?)(<\/flowable:sendSynchronously>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      if (!trimmed) return _m;
+      return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Convert bpmn:sendTask to bpmn:serviceTask with flowable:type="send-event" in the serialized XML
+function mapSendTaskToServiceOnExport(xml: string): string {
+  try {
+    let out = xml;
+    const ensureType = (attrs: string) => (/\bflowable:type\s*=/.test(attrs) ? attrs : `${attrs} flowable:type="send-event"`);
+    const replaceTriplet = (prefix: string) => {
+      const openSelf = new RegExp(`<${prefix}sendTask\\b([^>]*?)\\/>`, 'g');
+      const open = new RegExp(`<${prefix}sendTask\\b([^>]*?)>`, 'g');
+      const close = new RegExp(`</${prefix}sendTask>`, 'g');
+      out = out.replace(openSelf, (_m, attrs) => `<${prefix}serviceTask${ensureType(attrs)} />`);
+      out = out.replace(open, (_m, attrs) => `<${prefix}serviceTask${ensureType(attrs)}>`);
+      out = out.replace(close, `</${prefix}serviceTask>`);
+    };
+    // Handle both prefixed and unprefixed forms
+    replaceTriplet('bpmn:');
+    replaceTriplet('');
+    return out;
+  } catch {
+    return xml;
+  }
+}
+
 // Convert the root <definitions> to Flowable Cloud-style header and normalize DI prefixes
 function toFlowableDefinitionHeader(xml: string): string {
   try {
@@ -492,6 +551,47 @@ function toFlowableDefinitionHeader(xml: string): string {
   }
 }
 
+// Ensure a <flowable:systemChannel/> exists on SendTask and on ServiceTask with flowable:type="send-event"
+function ensureSystemChannelForSendTasks() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    const needsSystemChannel = (bo: any) => {
+      const t = bo && bo.$type;
+      if (t === 'bpmn:SendTask') return true;
+      if (t === 'bpmn:ServiceTask') {
+        const v = bo.get ? bo.get('flowable:type') : (bo as any)['flowable:type'];
+        return v === 'send-event';
+      }
+      return false;
+    };
+    const hasSystemChannel = (bo: any) => {
+      const ext = bo && (bo.get ? bo.get('extensionElements') : bo.extensionElements);
+      const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+      return values.some((v: any) => v && String(v.$type) === 'flowable:SystemChannel' || String(v.$type) === 'flowable:systemChannel');
+    };
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || !needsSystemChannel(bo) || hasSystemChannel(bo)) return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const sys = bpmnFactory.create('flowable:SystemChannel', {});
+      try { modeling.updateModdleProperties(el, ext, { values: values.concat([ sys ]) }); } catch {}
+    });
+  } catch (e) {
+    console.warn('ensureSystemChannelForSendTasks failed:', e);
+  }
+}
+
 function zoom(delta: number) {
   const canvas = modeler.get('canvas');
   const current = canvas.zoom();
@@ -512,6 +612,15 @@ function sanitizeModel() {
     const elementRegistry = modeler.get('elementRegistry');
     const bpmnReplace = modeler.get('bpmnReplace');
     if (!elementRegistry || !bpmnReplace) return;
+    // Map ServiceTask with flowable:type="send-event" -> SendTask for display
+    try {
+      const serviceSend = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ServiceTask' && (el.businessObject.get ? el.businessObject.get('flowable:type') === 'send-event' : (el.businessObject as any)['flowable:type'] === 'send-event'));
+      serviceSend.forEach((el: any) => {
+        try { bpmnReplace.replaceElement(el, { type: 'bpmn:SendTask' }); } catch {}
+      });
+    } catch (e) {
+      console.warn('Send-event ServiceTask view mapping failed:', e);
+    }
     const scriptTasks = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ScriptTask');
     scriptTasks.forEach((el: any) => {
       try {
