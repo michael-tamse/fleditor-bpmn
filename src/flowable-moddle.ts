@@ -80,7 +80,10 @@ const flowableModdle: Record<string, any> = {
       isAbstract: true,
       extends: [ 'bpmn:ServiceTask' ],
       properties: [
-        { name: 'delegateExpression', isAttr: true, type: 'String' }
+        { name: 'delegateExpression', isAttr: true, type: 'String' },
+        // External worker topic + implementation type hint
+        { name: 'topic', isAttr: true, type: 'String' },
+        { name: 'type', isAttr: true, type: 'String' }
       ]
     }
   ]

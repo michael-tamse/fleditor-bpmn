@@ -50,6 +50,79 @@ function DelegateExpressionEntry(props: { element: BPMNElement }) {
   return TextFieldEntry({ id: 'flowable-delegateExpression', element: el, label: translate ? translate('Delegate expression') : 'Delegate expression', getValue, setValue, debounce });
 }
 
+// Service Task: Implementation type selector and value entry (Delegate Expression vs External Topic)
+type ServiceImplType = 'delegate' | 'external';
+
+function getServiceImplType(bo: any): ServiceImplType {
+  const isExternal = (bo.get ? bo.get('flowable:type') : bo['flowable:type']) === 'external-worker'
+    || !!(bo.get ? bo.get('flowable:topic') : bo['flowable:topic']);
+  return isExternal ? 'external' : 'delegate';
+}
+
+function ServiceImplementationTypeEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const bo = element.businessObject;
+
+  const getValue = () => getServiceImplType(bo);
+  const setValue = (val: ServiceImplType) => {
+    if (val === 'external') {
+      const updates: any = {
+        'flowable:type': 'external-worker',
+        'flowable:exclusive': false,
+        // switching to external: clear delegateExpression
+        'flowable:delegateExpression': undefined,
+        // also remove async flags from XML
+        'flowable:async': undefined,
+        'flowable:asyncLeave': undefined,
+        'flowable:asyncLeaveExclusive': undefined
+      };
+      modeling.updateProperties(element, updates);
+    } else {
+      const updates: any = {
+        'flowable:type': undefined,
+        // switching to delegate: clear topic
+        'flowable:topic': undefined
+      };
+      modeling.updateProperties(element, updates);
+    }
+  };
+  const getOptions = () => ([
+    { label: translate ? translate('Delegate Expression') : 'Delegate Expression', value: 'delegate' },
+    { label: translate ? translate('External') : 'External', value: 'external' }
+  ]);
+  return SelectEntry({ id: 'flowable-service-impl', element, label: translate ? translate('Implementation') : 'Implementation', getValue, setValue, getOptions });
+}
+
+function ServiceImplementationValueEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const bo = element.businessObject;
+
+  const getValue = () => {
+    const type = getServiceImplType(bo);
+    if (type === 'external') return (bo.get ? bo.get('flowable:topic') : bo['flowable:topic']) || '';
+    return (bo.get ? bo.get('flowable:delegateExpression') : bo['flowable:delegateExpression']) || '';
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim() || undefined;
+    const type = getServiceImplType(bo);
+    if (type === 'external') {
+      modeling.updateProperties(element, { 'flowable:topic': v });
+    } else {
+      modeling.updateProperties(element, { 'flowable:delegateExpression': v });
+    }
+  };
+  const label = getServiceImplType(bo) === 'external'
+    ? (translate ? translate('Topic') : 'Topic')
+    : (translate ? translate('Delegate expression') : 'Delegate expression');
+
+  return TextFieldEntry({ id: 'flowable-service-impl-value', element, label, getValue, setValue, debounce });
+}
+
 function AsyncEntry(props: { element: BPMNElement }) {
   const modeling = useService('modeling');
   const translate = useService('translate');
@@ -549,25 +622,30 @@ function FlowableElementIndexVariableEntry(props: { element: BPMNElement }) {
 }
 
   function createExecutionGroup(element: BPMNElement) {
-    // Desired order:
+    const bo = element && element.businessObject;
+    const isExternalService = isServiceTask(element) && getServiceImplType(bo) === 'external';
+    // Desired order when not external:
     // Asynchronous, Exclusive, Leave asynchronously, Leave exclusive
-    const entries: any[] = [ { id: 'flowable-async', component: AsyncEntry, isEdited: isCheckboxEntryEdited } ];
-    if (!isStartOrEndEvent(element)) {
-      entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry, isEdited: isCheckboxEntryEdited });
+    const entries: any[] = [];
+    if (!isExternalService) {
+      entries.push({ id: 'flowable-async', component: AsyncEntry, isEdited: isCheckboxEntryEdited });
+      if (!isStartOrEndEvent(element)) {
+        entries.push({ id: 'flowable-exclusive', component: ExclusiveEntry, isEdited: isCheckboxEntryEdited });
+      }
+      entries.push({ id: 'flowable-asyncLeave', component: AsyncLeaveEntry, isEdited: isCheckboxEntryEdited });
+      if (!isStartOrEndEvent(element)) {
+        entries.push({ id: 'flowable-asyncLeaveExclusive', component: ExclusiveLeaveEntry, isEdited: isCheckboxEntryEdited });
+      }
+      // Spacer between async/exclusive markers and generic flags
+      entries.push({ id: 'execution-spacer-1', component: SpacerEntry });
     }
-    entries.push({ id: 'flowable-asyncLeave', component: AsyncLeaveEntry, isEdited: isCheckboxEntryEdited });
-  if (!isStartOrEndEvent(element)) {
-    entries.push({ id: 'flowable-asyncLeaveExclusive', component: ExclusiveLeaveEntry, isEdited: isCheckboxEntryEdited });
-  }
-  // Spacer between async/exclusive markers and generic flags
-  entries.push({ id: 'execution-spacer-1', component: SpacerEntry });
-  // New: Is for compensation
-  entries.push({ id: 'bpmn-isForCompensation', component: IsForCompensationEntry, isEdited: isCheckboxEntryEdited });
-  // CallActivity-specific: Complete asynchronously (completion on called instance)
-  if (isCallActivity(element)) {
-    entries.push({ id: 'flowable-completeAsync', component: CompleteAsyncEntry, isEdited: isCheckboxEntryEdited });
-  }
-  return {
+    // Always show Is for compensation
+    entries.push({ id: 'bpmn-isForCompensation', component: IsForCompensationEntry, isEdited: isCheckboxEntryEdited });
+    // CallActivity-specific: Complete asynchronously (completion on called instance)
+    if (isCallActivity(element)) {
+      entries.push({ id: 'flowable-completeAsync', component: CompleteAsyncEntry, isEdited: isCheckboxEntryEdited });
+    }
+    return {
       id: 'execution',
       label: 'Execution',
       entries,
@@ -598,15 +676,25 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         if (insertAfterIdx < 0) return;
         general.entries.splice(insertAfterIdx + 1, 0, { id: 'general-spacer-1', component: SpacerEntry });
       };
-      // Add Flowable Service Task "Delegate expression" field to General
+      // Add Flowable Service Task implementation selector + value field to General
       if (isServiceTask(element)) {
         const general = groups && groups.find((g) => g && g.id === 'general');
         if (general && Array.isArray(general.entries)) {
-          const exists = general.entries.some((e: any) => e && e.id === 'flowable-delegateExpression');
-          if (!exists) {
-            const idx = general.entries.findIndex((e: any) => e && e.id === 'id');
-            const def = { id: 'flowable-delegateExpression', component: DelegateExpressionEntry, isEdited: isTextFieldEntryEdited };
-            if (idx >= 0) general.entries.splice(idx + 1, 0, def); else general.entries.unshift(def);
+          const hasType = general.entries.some((e: any) => e && e.id === 'flowable-service-impl');
+          const hasValue = general.entries.some((e: any) => e && e.id === 'flowable-service-impl-value');
+          let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+          if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+          let offset = 1;
+          if (!hasType) {
+            const defType = { id: 'flowable-service-impl', component: ServiceImplementationTypeEntry, isEdited: isSelectEntryEdited };
+            const idx = insertAfterIdx >= 0 ? (insertAfterIdx + offset) : 0;
+            general.entries.splice(idx, 0, defType);
+            offset += 1;
+          }
+          if (!hasValue) {
+            const defVal = { id: 'flowable-service-impl-value', component: ServiceImplementationValueEntry, isEdited: isTextFieldEntryEdited };
+            const idx = insertAfterIdx >= 0 ? (insertAfterIdx + offset) : 0;
+            general.entries.splice(idx, 0, defVal);
           }
         }
       }
