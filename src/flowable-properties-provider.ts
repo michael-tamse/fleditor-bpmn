@@ -1103,6 +1103,10 @@ function BusinessKeyEntry(props: { element: BPMNElement }) {
       'flowable:sameDeployment': true,
       'flowable:fallbackToDefaultTenant': true
     };
+    // If an explicit businessKey is provided, do not inherit the business key
+    if ((value || '').trim()) {
+      updates['flowable:inheritBusinessKey'] = false;
+    }
     modeling.updateProperties(element, updates);
   };
   return TextFieldEntry({ id: 'flowable-businessKey', element, label: translate ? translate('Business key') : 'Business key', getValue, setValue, debounce });
@@ -1116,7 +1120,10 @@ function InheritBusinessKeyEntry(props: { element: BPMNElement }) {
   const bo = element.businessObject;
   const getValue = () => {
     const v = bo && (bo.get ? bo.get('flowable:inheritBusinessKey') : (bo as any)['flowable:inheritBusinessKey']);
-    return typeof v === 'boolean' ? v : true;
+    if (typeof v === 'boolean') return v;
+    // Default: if explicit businessKey is set, do NOT inherit; otherwise default to true
+    const hasBusinessKey = !!(bo && (bo.get ? bo.get('flowable:businessKey') : (bo as any)['flowable:businessKey']));
+    return hasBusinessKey ? false : true;
   };
   const setValue = (value: boolean) => {
     const updates: any = {
