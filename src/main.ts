@@ -691,6 +691,12 @@ function ensureCorrelationParameterForIntermediateCatchEvents() {
     all.forEach((el: any) => {
       const bo = el && el.businessObject;
       if (!bo || bo.$type !== 'bpmn:IntermediateCatchEvent') return;
+      
+      // Skip timer events
+      const eventDefinitions = bo && bo.eventDefinitions;
+      const isTimer = Array.isArray(eventDefinitions) && eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:TimerEventDefinition');
+      if (isTimer) return;
+      
       let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
       if (!ext) {
         ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
@@ -722,16 +728,17 @@ function stripMessageEventDefinitionsForFlowableEvents() {
       const bo: any = el.businessObject;
       const defs = Array.isArray(bo.eventDefinitions) ? bo.eventDefinitions : [];
       if (!defs.length) return;
-      const onlyMessage = defs.every((d: any) => d && d.$type === 'bpmn:MessageEventDefinition');
-      if (!onlyMessage) return;
-      const ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
-      const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
-      const hasFlowableMeta = values && values.some((v: any) => {
-        const t = String(v && v.$type);
-        return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter' || /flowable:eventOutParameter/i.test(t);
-      });
-      if (hasFlowableMeta) {
-        try { modeling.updateModdleProperties(el, bo, { eventDefinitions: [] }); } catch {}
+      
+      // Prüfe ob es ein Timer-Event ist
+      const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
+      if (!hasTimer) return; // Nur Timer-Events bearbeiten
+      
+      // Bei Timer-Events: MessageEventDefinition entfernen falls vorhanden
+      const hasMessage = defs.some((d: any) => d && d.$type === 'bpmn:MessageEventDefinition');
+      if (hasMessage) {
+        // Behalte nur die Timer-Definition
+        const newDefs = defs.filter((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
+        try { modeling.updateModdleProperties(el, bo, { eventDefinitions: newDefs }); } catch {}
       }
     });
   } catch (e) {

@@ -15,8 +15,14 @@ declare module '@bpmn-io/properties-panel' {
   export const Group: any;
   export const CheckboxEntry: any;
   export const TextFieldEntry: any;
+  export const TextAreaEntry: any;
+  export const ListGroup: any;
+  export const ListEntry: any;
+  export const SelectEntry: any;
   export const isCheckboxEntryEdited: (node?: any) => boolean;
   export const isTextFieldEntryEdited: (node?: any) => boolean;
+  export const isTextAreaEntryEdited: (node?: any) => boolean;
+  export const isSelectEntryEdited: (node?: any) => boolean;
 }
 
 // Optional: keep for completeness if imported elsewhere

@@ -38,6 +38,15 @@ function isCallActivity(element: BPMNElement): boolean {
   return /CallActivity$/.test(getType(element));
 }
 
+// Hilfsfunktion: Prüft, ob ein IntermediateCatchEvent eine TimerEventDefinition besitzt
+function isTimerIntermediateCatchEvent(element: BPMNElement): boolean {
+  if (!isIntermediateCatchEvent(element)) return false;
+  const bo = element.businessObject;
+  const eventDefinitions = bo && bo.eventDefinitions;
+  if (!Array.isArray(eventDefinitions)) return false;
+  return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:TimerEventDefinition');
+}
+
 function isSequenceFlow(element: BPMNElement): boolean {
   return /SequenceFlow$/.test(getType(element));
 }
@@ -1372,35 +1381,37 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           }
         }
       }
-      // IntermediateCatchEvent customizations (same as ReceiveTask)
+      // IntermediateCatchEvent customizations
       if (isIntermediateCatchEvent(element)) {
-        // General: add Event Type under ID
-        const general = groups && groups.find((g) => g && g.id === 'general');
-        if (general && Array.isArray(general.entries)) {
-          const exists = general.entries.some((e: any) => e && e.id === 'flowable-eventType');
-          if (!exists) {
-            let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
-            if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
-            const def = { id: 'flowable-eventType', component: EventTypeEntry, isEdited: isTextFieldEntryEdited };
-            if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
+        if (!isTimerIntermediateCatchEvent(element)) {
+          // General: add Event Type under ID
+          const general = groups && groups.find((g) => g && g.id === 'general');
+          if (general && Array.isArray(general.entries)) {
+            const exists = general.entries.some((e: any) => e && e.id === 'flowable-eventType');
+            if (!exists) {
+              let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+              if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+              const def = { id: 'flowable-eventType', component: EventTypeEntry, isEdited: isTextFieldEntryEdited };
+              if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
+            }
           }
-        }
-        // Group: Correlation parameter (before Inbound mapping)
-        const existsCorr = groups && groups.some((g) => g && g.id === 'flowable-correlation-parameters');
-        if (!existsCorr) {
-          const corr = createCorrelationParametersGroup(element);
-          const idxGen = groups.findIndex((g) => g && g.id === 'general');
-          if (idxGen >= 0) groups.splice(idxGen + 1, 0, corr); else groups.push(corr);
-        }
-        // Group: Inbound event mapping after Correlation parameter (or General if no corr)
-        const existsIn = groups && groups.some((g) => g && g.id === 'flowable-inbound-event-mapping');
-        if (!existsIn) {
-          const inGroup = createInboundEventMappingGroup(element);
-          const idxCorr = groups.findIndex((g) => g && g.id === 'flowable-correlation-parameters');
-          if (idxCorr >= 0) groups.splice(idxCorr + 1, 0, inGroup);
-          else {
+          // Group: Correlation parameter (before Inbound mapping)
+          const existsCorr = groups && groups.some((g) => g && g.id === 'flowable-correlation-parameters');
+          if (!existsCorr) {
+            const corr = createCorrelationParametersGroup(element);
             const idxGen = groups.findIndex((g) => g && g.id === 'general');
-            if (idxGen >= 0) groups.splice(idxGen + 1, 0, inGroup); else groups.push(inGroup);
+            if (idxGen >= 0) groups.splice(idxGen + 1, 0, corr); else groups.push(corr);
+          }
+          // Group: Inbound event mapping after Correlation parameter (or General if no corr)
+          const existsIn = groups && groups.some((g) => g && g.id === 'flowable-inbound-event-mapping');
+          if (!existsIn) {
+            const inGroup = createInboundEventMappingGroup(element);
+            const idxCorr = groups.findIndex((g) => g && g.id === 'flowable-correlation-parameters');
+            if (idxCorr >= 0) groups.splice(idxCorr + 1, 0, inGroup);
+            else {
+              const idxGen = groups.findIndex((g) => g && g.id === 'general');
+              if (idxGen >= 0) groups.splice(idxGen + 1, 0, inGroup); else groups.push(inGroup);
+            }
           }
         }
       }
