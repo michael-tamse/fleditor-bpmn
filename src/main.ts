@@ -78,6 +78,29 @@ function initModeler() {
               }
             }
           }
+          // Defaults for new IntermediateCatchEvent: correlation parameter
+          if (bo && bo.$type === 'bpmn:IntermediateCatchEvent') {
+            const bpmnFactory = modeler.get('bpmnFactory');
+            const modeling = modeler.get('modeling');
+            const eventBus = modeler.get('eventBus');
+            if (bpmnFactory && modeling) {
+              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+              if (!ext) {
+                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+              }
+              const values = (ext.get ? ext.get('values') : ext.values) || [];
+              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+              if (!hasCorr) {
+                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+                  name: 'businessKey',
+                  value: '${execution.getProcessInstanceBusinessKey()}'
+                });
+                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+              }
+            }
+          }
         } catch {}
         if (bo && bo.$type === 'bpmn:CallActivity') {
           const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
@@ -400,6 +423,8 @@ async function saveXML() {
     ensureSystemChannelForSendTasks();
     ensureDefaultOutboundMappingForSendTasks();
     ensureCorrelationParameterForReceiveTasks();
+    stripMessageEventDefinitionsForFlowableEvents();
+    ensureCorrelationParameterForIntermediateCatchEvents();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
     const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
@@ -653,6 +678,67 @@ function ensureCorrelationParameterForReceiveTasks() {
   }
 }
 
+// Ensure default correlation parameter for IntermediateCatchEvent before export
+function ensureCorrelationParameterForIntermediateCatchEvents() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:IntermediateCatchEvent') return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+      if (!hasCorr) {
+        const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+          name: 'businessKey',
+          value: '${execution.getProcessInstanceBusinessKey()}'
+        });
+        try { modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureCorrelationParameterForIntermediateCatchEvents failed:', e);
+  }
+}
+
+// Remove auto-added MessageEventDefinition for Flowable event-registry style intermediate catch events before export
+function stripMessageEventDefinitionsForFlowableEvents() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    if (!elementRegistry || !modeling) return;
+    const ices = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:IntermediateCatchEvent');
+    ices.forEach((el: any) => {
+      const bo: any = el.businessObject;
+      const defs = Array.isArray(bo.eventDefinitions) ? bo.eventDefinitions : [];
+      if (!defs.length) return;
+      const onlyMessage = defs.every((d: any) => d && d.$type === 'bpmn:MessageEventDefinition');
+      if (!onlyMessage) return;
+      const ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+      const hasFlowableMeta = values && values.some((v: any) => {
+        const t = String(v && v.$type);
+        return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter' || /flowable:eventOutParameter/i.test(t);
+      });
+      if (hasFlowableMeta) {
+        try { modeling.updateModdleProperties(el, bo, { eventDefinitions: [] }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('stripMessageEventDefinitionsForFlowableEvents failed:', e);
+  }
+}
+
 // Ensure a <flowable:systemChannel/> exists on SendTask and on ServiceTask with flowable:type="send-event"
 function ensureSystemChannelForSendTasks() {
   try {
@@ -709,11 +795,11 @@ function fitViewport() {
 }
 
 // Sanitize ScriptTask -> Task
-function sanitizeModel() {
-  try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const bpmnReplace = modeler.get('bpmnReplace');
-    if (!elementRegistry || !bpmnReplace) return;
+  function sanitizeModel() {
+    try {
+      const elementRegistry = modeler.get('elementRegistry');
+      const bpmnReplace = modeler.get('bpmnReplace');
+      if (!elementRegistry || !bpmnReplace) return;
     // Map ServiceTask with flowable:type="send-event" -> SendTask for display
     try {
       const serviceSend = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ServiceTask' && (el.businessObject.get ? el.businessObject.get('flowable:type') === 'send-event' : (el.businessObject as any)['flowable:type'] === 'send-event'));
@@ -724,17 +810,43 @@ function sanitizeModel() {
       console.warn('Send-event ServiceTask view mapping failed:', e);
     }
     const scriptTasks = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ScriptTask');
-    scriptTasks.forEach((el: any) => {
+      scriptTasks.forEach((el: any) => {
+        try {
+          bpmnReplace.replaceElement(el, { type: 'bpmn:Task' });
+        } catch (e) {
+          console.warn('Konnte ScriptTask nicht ersetzen:', e);
+        }
+      });
+
+      // Ensure icon rendering for IntermediateCatchEvent by adding MessageEventDefinition
       try {
-        bpmnReplace.replaceElement(el, { type: 'bpmn:Task' });
+        const modeling = modeler.get('modeling');
+        const bpmnFactory = modeler.get('bpmnFactory');
+        if (modeling && bpmnFactory) {
+          const ices = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:IntermediateCatchEvent');
+          ices.forEach((el: any) => {
+            const bo: any = el.businessObject;
+            const defs = Array.isArray(bo.eventDefinitions) ? bo.eventDefinitions : [];
+            if (defs.length) return;
+            const ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+            const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+            const hasFlowableMeta = values && values.some((v: any) => {
+              const t = String(v && v.$type);
+              return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter' || /flowable:eventOutParameter/i.test(t);
+            });
+            if (hasFlowableMeta) {
+              const med = bpmnFactory.create('bpmn:MessageEventDefinition', {});
+              try { modeling.updateModdleProperties(el, bo, { eventDefinitions: [ med ] }); } catch {}
+            }
+          });
+        }
       } catch (e) {
-        console.warn('Konnte ScriptTask nicht ersetzen:', e);
+        console.warn('Ensure MessageEventDefinition failed:', e);
       }
-    });
-  } catch (e) {
-    console.warn('Sanitize fehlgeschlagen:', e);
+    } catch (e) {
+      console.warn('Sanitize fehlgeschlagen:', e);
+    }
   }
-}
 
 // Migrate legacy asyncBefore/asyncAfter to Flowable async/asyncLeave
 function migrateAsyncFlags() {
