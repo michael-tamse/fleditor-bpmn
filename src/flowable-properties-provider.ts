@@ -349,7 +349,12 @@ function getEventInParameters(bo: any) {
 function addEventInParameter(element: any, bo: any, bpmnFactory: any, modeling: any) {
   const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
   const values = (ext.get ? ext.get('values') : ext.values) || [];
-  const param = bpmnFactory.create('flowable:EventInParameter', {});
+  const existing = getEventInParameters(bo);
+  const isFirst = !existing || existing.length === 0;
+  const defaults = isFirst
+    ? { source: '${execution.getProcessInstanceBusinessKey()}', target: 'businessKey' }
+    : {};
+  const param = bpmnFactory.create('flowable:EventInParameter', defaults);
   modeling.updateModdleProperties(element, ext, { values: values.concat([ param ]) });
 }
 
@@ -435,7 +440,7 @@ function EventCorrelationParamNameEntry(props: { element: BPMNElement, id: strin
   const bo = element.businessObject;
   const getValue = () => {
     const p = getEventCorrelationParameter(bo);
-    return (p && (p.get ? p.get('name') : p.name)) || '';
+    return (p && (p.get ? p.get('name') : p.name)) || 'businessKey';
   };
   const setValue = (value: string) => {
     const v = (value || '').trim();
@@ -477,7 +482,7 @@ function EventCorrelationParamValueEntry(props: { element: BPMNElement, id: stri
   const bo = element.businessObject;
   const getValue = () => {
     const p = getEventCorrelationParameter(bo);
-    return (p && (p.get ? p.get('value') : p.value)) || '';
+    return (p && (p.get ? p.get('value') : p.value)) || '${execution.getProcessInstanceBusinessKey()}';
   };
   const setValue = (value: string) => {
     const v = (value || '').trim();

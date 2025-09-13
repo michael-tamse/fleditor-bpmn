@@ -54,6 +54,31 @@ function initModeler() {
         if (isImporting) return;
         const el = e && e.element;
         const bo = el && el.businessObject;
+        // Defaults for new ReceiveTask: correlation parameter
+        try {
+          if (bo && bo.$type === 'bpmn:ReceiveTask') {
+            const bpmnFactory = modeler.get('bpmnFactory');
+            const modeling = modeler.get('modeling');
+            const eventBus = modeler.get('eventBus');
+            if (bpmnFactory && modeling) {
+              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+              if (!ext) {
+                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+              }
+              const values = (ext.get ? ext.get('values') : ext.values) || [];
+              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter' || String(v && v.$type) === 'flowable:eventCorrelationParameter');
+              if (!hasCorr) {
+                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+                  name: 'businessKey',
+                  value: '${execution.getProcessInstanceBusinessKey()}'
+                });
+                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+              }
+            }
+          }
+        } catch {}
         if (bo && bo.$type === 'bpmn:CallActivity') {
           const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
           const updates: any = {};
@@ -373,6 +398,8 @@ async function saveXML() {
     ensureCallActivityDefaults();
     pruneInvalidCallActivityMappings();
     ensureSystemChannelForSendTasks();
+    ensureDefaultOutboundMappingForSendTasks();
+    ensureCorrelationParameterForReceiveTasks();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
     const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
@@ -548,6 +575,81 @@ function toFlowableDefinitionHeader(xml: string): string {
     return out;
   } catch {
     return xml;
+  }
+}
+
+// Ensure first default outbound event mapping exists for SendTask / ServiceTask(send-event)
+function ensureDefaultOutboundMappingForSendTasks() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    const isSendLike = (bo: any) => {
+      const t = bo && bo.$type;
+      if (t === 'bpmn:SendTask') return true;
+      if (t === 'bpmn:ServiceTask') {
+        const v = bo.get ? bo.get('flowable:type') : (bo as any)['flowable:type'];
+        return v === 'send-event';
+      }
+      return false;
+    };
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || !isSendLike(bo)) return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const hasEventIn = values.some((v: any) => String(v && v.$type).toLowerCase() === 'flowable:eventinparameter' || String(v && v.$type).toLowerCase() === 'flowable:eventinparameter');
+      if (!hasEventIn) {
+        const param = bpmnFactory.create('flowable:EventInParameter', {
+          source: '${execution.getProcessInstanceBusinessKey()}',
+          target: 'businessKey'
+        });
+        try { modeling.updateModdleProperties(el, ext, { values: values.concat([ param ]) }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureDefaultOutboundMappingForSendTasks failed:', e);
+  }
+}
+
+// Ensure a default correlation parameter exists for ReceiveTask
+function ensureCorrelationParameterForReceiveTasks() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:ReceiveTask') return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+      if (!hasCorr) {
+        const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+          name: 'businessKey',
+          value: '${execution.getProcessInstanceBusinessKey()}'
+        });
+        try { modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureCorrelationParameterForReceiveTasks failed:', e);
   }
 }
 
