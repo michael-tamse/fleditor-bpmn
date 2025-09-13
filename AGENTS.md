@@ -20,23 +20,63 @@ This document guides agents (and contributors) working on this BPMN editor. It c
 Note: Large bundle warnings are expected; not a blocker.
 
 ## Key Files
-- `src/main.ts`: App bootstrap, canvas + properties panel wiring, palette/context pad/replace menu filtering, file I/O, zoom, small migrations.
-- `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types).
+- `src/main.ts`: App bootstrap, canvas + properties panel wiring, palette/context pad/replace menu filtering, file I/O, zoom. Also hosts import/export helpers (icon/DI fixes, XML rewrites) and small migrations/defaults.
+- `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types) including Event/Mapping/Variable Aggregation/Start Correlation types.
 - `src/flowable-properties-provider.ts`: Custom properties provider logic. Adds/adjusts entries and groups and integrates with the default provider.
 - `styles.css`, `index.html`: Base UI shell.
 
-Code references (clickable in IDE):
-- `src/flowable-properties-provider.ts:424` (`FlowablePropertiesProvider` registration and `getGroups` override)
-- `src/flowable-properties-provider.ts:401` (`createExecutionGroup` with ordering and spacer)
-- `src/main.ts:17` (Modeler initialization + additional modules)
+Quick anchors (open in IDE):
+- `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Variable Aggregations.
+- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask mapping, icon helpers).
 
 ## Properties Panel Customizations
-- Execution group is injected for "engine-executed" tasks (Service/Send/Receive/BusinessRule/Script/CallActivity) with ordered flags:
+- General group: adds a visual separator after `ID` if extra fields are present.
+- SequenceFlow: adds a "Condition Expression" (`bpmn:FormalExpression`) textarea.
+- Execution group: injected for engine-executed tasks (Service/Send/Receive/BusinessRule/Script/CallActivity) in this order
   - `flowable:async`, `flowable:exclusive`, `flowable:asyncLeave`, `flowable:asyncLeaveExclusive`
-  - Spacer between async/exclusive markers and generic flags; then `isForCompensation`.
-- General group helper adds a visual separator after `ID` when any extra fields beyond Name/ID are present.
-- SequenceFlow adds a "Condition Expression" textarea stored as `bpmn:FormalExpression`.
-- ServiceTask adds Flowable "Delegate expression" to General.
+  - spacer, then `isForCompensation` and (for CallActivity) `flowable:completeAsync`.
+  - For ServiceTask with `flowable:type="external-worker"` the four async/exclusive checkboxes and spacer are hidden.
+
+### Service Task
+- Implementation selector in General: `Delegate Expression` vs `External`.
+  - Delegate Expression → `flowable:delegateExpression` text field.
+  - External → `Topic` text field bound to `flowable:topic`.
+  - Switching to External sets `flowable:type="external-worker"`, `flowable:exclusive=false` and clears `flowable:delegateExpression`, `flowable:(async|asyncLeave|asyncLeaveExclusive)`.
+
+### Send Task (message send-event)
+- General: `Event key (type)` → `<flowable:eventType>` (CDATA).
+- Checkbox: `Send synchronously` → `<flowable:sendSynchronously><![CDATA[true]]>`.
+- Section: `Outbound event mapping` → list of `<flowable:eventInParameter source target>`.
+  - First add is prefilled with `source="${execution.getProcessInstanceBusinessKey()}"`, `target="businessKey"`.
+- Export safety: ensures one default `eventInParameter` and one `<flowable:systemChannel/>` exist if none present.
+
+### Receive Task (message receive)
+- General: `Event key (type)` → `<flowable:eventType>` (CDATA).
+- Section: `Correlation parameter` (single entry, not a list) → `<flowable:eventCorrelationParameter name value>`.
+- Section: `Inbound event mapping` → list of `<flowable:eventOutParameter source target transient?>`.
+- Defaults: newly created ReceiveTasks get a default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`).
+
+### Intermediate Catch Event / Boundary Event (message-style)
+- Same three sections as ReceiveTask when NOT a Timer event.
+- Default `Message` group is removed.
+- Defaults: newly created ICE/Boundary get default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`).
+
+### Start Event (message-style only)
+- Shows the three sections only if Flowable message metadata exists (presence of `<flowable:eventType>` or `<flowable:eventCorrelationParameter>`) or a `bpmn:MessageEventDefinition` is present, and not a Timer Start.
+- Setting `Event key (type)` auto-creates the default correlation parameter if missing.
+- Export safety: ensures `<flowable:startEventCorrelationConfiguration><![CDATA[startNewInstance]]>` exists for message-starts.
+
+### Call Activity
+- General additions: `Process reference` (`calledElement`), `Business key` (`flowable:businessKey`), `Inherit business key` (`flowable:inheritBusinessKey`), `Inherit variables`.
+- Inherit business key default logic: if explicit `flowable:businessKey` is present, default is false; otherwise defaults to true. Editing Business key sets `inheritBusinessKey=false` automatically.
+- In/Out mappings: list UIs for `flowable:in` / `flowable:out` on `extensionElements` with pruning of incomplete `out` mappings on save.
+
+### Multi-Instance (Loop Characteristics)
+- Adds Flowable fields to MI section in order: `flowable:collection`, `flowable:elementVariable`, `flowable:elementIndexVariable`.
+- Variable aggregations: new section shown only for MI elements.
+  - Stored as `<flowable:variableAggregation>` under `loopCharacteristics > extensionElements`.
+  - Each aggregation has `target`, creation mode (`createOverviewVariable` / `storeAsTransientVariable` / default), and a nested list of `Definitions`.
+  - Definitions are unprefixed `<variable source target/>` children (we read legacy `flowable:variableAggregationDefinition` too). UI writes typed entries internally and rewrites to `<variable/>` on export.
 
 Patterns to follow:
 - Use `useService('modeling')` and `updateProperties` for simple properties; `updateModdleProperties` for nested/moddle instances.
@@ -94,6 +134,20 @@ In `src/main.ts` we prune unsupported elements from palette, context pad, replac
 - Build fails to clean `dist/`: rerun with elevated permissions and a short justification.
 - Properties not updating: ensure correct use of `updateProperties` vs. `updateModdleProperties` and that the element/BO supports the attribute.
 - Entry not shown: verify `getGroups` conditions, group ID match (`general`, `multiInstance`), and that `entries` array is updated in-place.
+- Message icon not shown: we inject `bpmn:MessageEventDefinition` for Start/ICE/Boundary at import if Flowable event metadata exists; we remove it only from the exported XML, not from the in-memory model.
+- SubProcess appears collapsed: import expands all matching `bpmndi:BPMNShape` with `isExpanded="true"`.
 
 ---
 This guide is intentionally concise. When in doubt, prefer small, targeted changes and verify with a build. If a task requires broader edits, propose a plan first.
+
+## Import / Export Behaviors (Summary)
+- Import helpers (model is updated for better UX):
+  - Add `bpmn:MessageEventDefinition` to Start/IntermediateCatch/Boundary if Flowable event metadata exists (for icon rendering).
+  - Expand all SubProcess DI shapes (`bpmndi:BPMNShape[isExpanded=true]`).
+  - Map `bpmn:ServiceTask[flowable:type=send-event]` to SendTask for display.
+- Export helpers (string-level XML rewrites; model remains intact):
+  - Wrap bodies in CDATA for condition expressions, `flowable:eventType`, `flowable:sendSynchronously`, and `flowable:startEventCorrelationConfiguration`.
+  - Ensure message-start correlation configuration and required defaults (Receive/Boundary/Start Correlation, SendTask defaults, systemChannel) are present.
+  - Remove `messageEventDefinition` only from the serialized XML for Start/ICE/Boundary (flowable event-registry style), keep it in-memory for icons.
+  - Map SendTask → ServiceTask with `flowable:type="send-event"` in XML.
+  - Normalize Flowable variable aggregation definitions to unprefixed `<variable/>` in XML.
