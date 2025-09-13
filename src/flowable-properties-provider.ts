@@ -42,6 +42,10 @@ function isCallActivity(element: BPMNElement): boolean {
   return /CallActivity$/.test(getType(element));
 }
 
+function isStartEvent(element: BPMNElement): boolean {
+  return /StartEvent$/.test(getType(element));
+}
+
 // Hilfsfunktion: Prüft, ob ein IntermediateCatchEvent eine TimerEventDefinition besitzt
 function isTimerIntermediateCatchEvent(element: BPMNElement): boolean {
   if (!isIntermediateCatchEvent(element)) return false;
@@ -318,6 +322,21 @@ function EventTypeEntry(props: { element: BPMNElement }) {
     } else {
       modeling.updateModdleProperties(element, et, { value: v });
     }
+    // If this is a StartEvent, ensure a default correlation parameter exists when setting event type
+    try {
+      if (isStartEvent(element)) {
+        const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+        const values = (ext.get ? ext.get('values') : ext.values) || [];
+        const hasCorr = values.some((x: any) => String(x && x.$type) === 'flowable:EventCorrelationParameter');
+        if (!hasCorr) {
+          const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+            name: 'businessKey',
+            value: '${execution.getProcessInstanceBusinessKey()}'
+          });
+          modeling.updateModdleProperties(element, ext, { values: values.concat([ corr ]) });
+        }
+      }
+    } catch {}
   };
   return TextFieldEntry({ id: 'flowable-eventType', element, label: translate ? translate('Event key (type)') : 'Event key (type)', getValue, setValue, debounce });
 }
@@ -1434,6 +1453,52 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           }
         }
       }
+      // StartEvent customizations (Message-like; show when Message definition or Flowable event meta present; skip for timers)
+      if (isStartEvent(element)) {
+        const bo = element.businessObject as any;
+        const hasTimer = Array.isArray(bo.eventDefinitions)
+          && bo.eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:TimerEventDefinition');
+        // detect Flowable message-style metadata
+        const ext = bo && (bo.get ? bo.get('extensionElements') : bo.extensionElements);
+        const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+        const hasFlowableMeta = values && values.some((v: any) => {
+          const t = String(v && v.$type);
+          return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter';
+        });
+        const hasMessageDef = Array.isArray(bo.eventDefinitions)
+          && bo.eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:MessageEventDefinition');
+        if (!hasTimer && (hasFlowableMeta || hasMessageDef)) {
+          // General: add Event Type under ID
+          const general = groups && groups.find((g) => g && g.id === 'general');
+          if (general && Array.isArray(general.entries)) {
+            const exists = general.entries.some((e: any) => e && e.id === 'flowable-eventType');
+            if (!exists) {
+              let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+              if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+              const def = { id: 'flowable-eventType', component: EventTypeEntry, isEdited: isTextFieldEntryEdited };
+              if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
+            }
+          }
+          // Group: Correlation parameter (before Inbound mapping)
+          const existsCorr = groups && groups.some((g) => g && g.id === 'flowable-correlation-parameters');
+          if (!existsCorr) {
+            const corr = createCorrelationParametersGroup(element);
+            const idxGen = groups.findIndex((g) => g && g.id === 'general');
+            if (idxGen >= 0) groups.splice(idxGen + 1, 0, corr); else groups.push(corr);
+          }
+          // Group: Inbound event mapping after Correlation parameter (or General if no corr)
+          const existsInSE = groups && groups.some((g) => g && g.id === 'flowable-inbound-event-mapping');
+          if (!existsInSE) {
+            const inGroup = createInboundEventMappingGroup(element);
+            const idxCorr = groups.findIndex((g) => g && g.id === 'flowable-correlation-parameters');
+            if (idxCorr >= 0) groups.splice(idxCorr + 1, 0, inGroup);
+            else {
+              const idxGen = groups.findIndex((g) => g && g.id === 'general');
+              if (idxGen >= 0) groups.splice(idxGen + 1, 0, inGroup); else groups.push(inGroup);
+            }
+          }
+        }
+      }
       // BoundaryEvent customizations (same as ICE), skip if timer
       if (isBoundaryEvent(element)) {
         if (!isTimerBoundaryEvent(element)) {
@@ -1584,8 +1649,8 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         groups.push(createExecutionGroup(element));
         try { console.debug && console.debug('[FlowableProvider] added Execution group'); } catch (e) {}
       }
-      // Remove default Message group for IntermediateCatchEvent / BoundaryEvent (we manage event via Flowable sections)
-      if (isIntermediateCatchEvent(element) || isBoundaryEvent(element)) {
+      // Remove default Message group for StartEvent / IntermediateCatchEvent / BoundaryEvent (we manage event via Flowable sections)
+      if (isStartEvent(element) || isIntermediateCatchEvent(element) || isBoundaryEvent(element)) {
         const idx = groups.findIndex((g: any) => {
           const id = String(g && g.id || '').toLowerCase();
           const label = String(g && g.label || '').toLowerCase();

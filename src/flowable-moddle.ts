@@ -22,6 +22,15 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'StartEventCorrelationConfiguration',
+      // flowable:startEventCorrelationConfiguration inside extensionElements (text body, prefer CDATA)
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'value', isBody: true, type: 'String' }
+      ]
+    },
+    {
       name: 'EventCorrelationParameter',
       // flowable:eventCorrelationParameter inside extensionElements
       isAbstract: false,

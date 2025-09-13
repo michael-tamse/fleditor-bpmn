@@ -124,6 +124,30 @@ function initModeler() {
               }
             }
           }
+          // Defaults for new StartEvent: correlation parameter (message-style only if event metadata present)
+          if (bo && bo.$type === 'bpmn:StartEvent') {
+            const bpmnFactory = modeler.get('bpmnFactory');
+            const modeling = modeler.get('modeling');
+            const eventBus = modeler.get('eventBus');
+            if (bpmnFactory && modeling) {
+              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+              if (!ext) {
+                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+              }
+              const values = (ext.get ? ext.get('values') : ext.values) || [];
+              const hasEventType = values.some((v: any) => String(v && v.$type) === 'flowable:EventType');
+              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+              if (!hasCorr && hasEventType) {
+                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+                  name: 'businessKey',
+                  value: '${execution.getProcessInstanceBusinessKey()}'
+                });
+                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+              }
+            }
+          }
         } catch {}
         if (bo && bo.$type === 'bpmn:CallActivity') {
           const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
@@ -447,14 +471,17 @@ async function saveXML() {
     ensureSystemChannelForSendTasks();
     ensureDefaultOutboundMappingForSendTasks();
     ensureCorrelationParameterForReceiveTasks();
-    stripMessageEventDefinitionsForFlowableEvents();
     ensureCorrelationParameterForIntermediateCatchEvents();
     ensureCorrelationParameterForBoundaryEvents();
+    ensureCorrelationParameterForStartEvents();
+    ensureStartEventCorrelationConfigurationForStartEvents();
     const { xml } = await modeler.saveXML({ format: true });
     const withCdata = wrapConditionExpressionsInCDATA(xml);
     const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
     const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
-    const mappedSendTasks = mapSendTaskToServiceOnExport(withSendSyncCdata);
+    const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
+    const withoutMessageDefs = stripMessageEventDefinitionsInXML(withStartCfgCdata);
+    const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
     const withFlowableHeader = toFlowableDefinitionHeader(mappedSendTasks);
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
@@ -549,6 +576,47 @@ function wrapSendSynchronouslyInCDATA(xml: string): string {
       if (!trimmed) return _m;
       return `${open}<![CDATA[${trimmed}]]>${close}`;
     });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure flowable:startEventCorrelationConfiguration body is wrapped in CDATA if present
+function wrapStartEventCorrelationConfigurationInCDATA(xml: string): string {
+  try {
+    const re = /(<flowable:startEventCorrelationConfiguration\b[^>]*>)([\s\S]*?)(<\/flowable:startEventCorrelationConfiguration>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      if (!trimmed) return _m;
+      return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Remove messageEventDefinition only in the serialized XML for Start/IntermediateCatch/Boundary events
+function stripMessageEventDefinitionsInXML(xml: string): string {
+  try {
+    const stripFor = (input: string, tag: string) => {
+      const re = new RegExp(`(<([\\\w-]+:)?${tag}\\b[^>]*>)([\\s\\S]*?)(<\\/([\\\w-]+:)?${tag}>)`, 'g');
+      return input.replace(re, (_m, open, _ns, inner, close) => {
+        const hasFlowable = /<flowable:(eventType|eventCorrelationParameter)\b/i.test(inner);
+        const hasTimer = /<([\w-]+:)?timerEventDefinition\b/i.test(inner);
+        if (!hasFlowable && !hasTimer) return _m;
+        let stripped = inner
+          .replace(/<([\w-]+:)?messageEventDefinition\b[^>]*\/>/gi, '')
+          .replace(/<([\w-]+:)?messageEventDefinition\b[^>]*>[\s\S]*?<\/([\w-]+:)?messageEventDefinition>/gi, '');
+        return `${open}${stripped}${close}`;
+      });
+    };
+    let out = xml;
+    out = stripFor(out, 'startEvent');
+    out = stripFor(out, 'intermediateCatchEvent');
+    out = stripFor(out, 'boundaryEvent');
+    return out;
   } catch {
     return xml;
   }
@@ -774,32 +842,111 @@ function ensureCorrelationParameterForIntermediateCatchEvents() {
   }
 }
 
-// Remove auto-added MessageEventDefinition for Flowable event-registry style intermediate catch events before export
+// Remove auto-added MessageEventDefinition for Flowable event-registry style events (Start/ICE/Boundary) before export
 function stripMessageEventDefinitionsForFlowableEvents() {
   try {
     const elementRegistry = modeler.get('elementRegistry');
     const modeling = modeler.get('modeling');
     if (!elementRegistry || !modeling) return;
-    const events = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:IntermediateCatchEvent' || el?.businessObject?.$type === 'bpmn:BoundaryEvent');
+    const events = elementRegistry.filter((el: any) => {
+      const t = el?.businessObject?.$type;
+      return t === 'bpmn:IntermediateCatchEvent' || t === 'bpmn:BoundaryEvent' || t === 'bpmn:StartEvent';
+    });
     events.forEach((el: any) => {
       const bo: any = el.businessObject;
       const defs = Array.isArray(bo.eventDefinitions) ? bo.eventDefinitions : [];
       if (!defs.length) return;
-      
-      // Prüfe ob es ein Timer-Event ist
       const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
-      if (!hasTimer) return; // Nur Timer-Events bearbeiten
-      
-      // Bei Timer-Events: MessageEventDefinition entfernen falls vorhanden
       const hasMessage = defs.some((d: any) => d && d.$type === 'bpmn:MessageEventDefinition');
-      if (hasMessage) {
-        // Behalte nur die Timer-Definition
+      if (hasTimer && hasMessage) {
+        // keep only timer if both present
         const newDefs = defs.filter((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
         try { modeling.updateModdleProperties(el, bo, { eventDefinitions: newDefs }); } catch {}
+        return;
+      }
+      // If only message def(s) present and Flowable event-registry metadata exists, strip them (we added for icon only)
+      const onlyMessage = hasMessage && defs.every((d: any) => d && d.$type === 'bpmn:MessageEventDefinition');
+      if (!onlyMessage) return;
+      const ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+      const hasFlowableMeta = values && values.some((v: any) => {
+        const t = String(v && v.$type);
+        return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter' || /flowable:eventOutParameter/i.test(t);
+      });
+      if (hasFlowableMeta) {
+        try { modeling.updateModdleProperties(el, bo, { eventDefinitions: [] }); } catch {}
       }
     });
   } catch (e) {
     console.warn('stripMessageEventDefinitionsForFlowableEvents failed:', e);
+  }
+}
+
+// Ensure default correlation parameter for StartEvent before export
+function ensureCorrelationParameterForStartEvents() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:StartEvent') return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const hasEventType = values.some((v: any) => String(v && v.$type) === 'flowable:EventType');
+      const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+      if (!hasCorr && hasEventType) {
+        const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+          name: 'businessKey',
+          value: '${execution.getProcessInstanceBusinessKey()}'
+        });
+        try { modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureCorrelationParameterForStartEvents failed:', e);
+  }
+}
+
+// Ensure a startEventCorrelationConfiguration exists for StartEvent (message) before export
+function ensureStartEventCorrelationConfigurationForStartEvents() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!bo || bo.$type !== 'bpmn:StartEvent') return;
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      const hasEventMeta = values.some((v: any) => {
+        const t = String(v && v.$type);
+        return t === 'flowable:EventType' || t === 'flowable:EventCorrelationParameter';
+      });
+      const hasCfg = values.some((v: any) => String(v && v.$type) === 'flowable:StartEventCorrelationConfiguration');
+      if (hasEventMeta && !hasCfg) {
+        const cfg = bpmnFactory.create('flowable:StartEventCorrelationConfiguration', { value: 'startNewInstance' });
+        try { modeling.updateModdleProperties(el, ext, { values: values.concat([ cfg ]) }); } catch {}
+      }
+    });
+  } catch (e) {
+    console.warn('ensureStartEventCorrelationConfigurationForStartEvents failed:', e);
   }
 }
 
@@ -915,12 +1062,15 @@ function fitViewport() {
         }
       });
 
-      // Ensure icon rendering for IntermediateCatchEvent / BoundaryEvent by adding MessageEventDefinition
+      // Ensure icon rendering for StartEvent / IntermediateCatchEvent / BoundaryEvent by adding MessageEventDefinition
       try {
         const modeling = modeler.get('modeling');
         const bpmnFactory = modeler.get('bpmnFactory');
         if (modeling && bpmnFactory) {
-          const events = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:IntermediateCatchEvent' || el?.businessObject?.$type === 'bpmn:BoundaryEvent');
+          const events = elementRegistry.filter((el: any) => {
+            const t = el?.businessObject?.$type;
+            return t === 'bpmn:IntermediateCatchEvent' || t === 'bpmn:BoundaryEvent' || t === 'bpmn:StartEvent';
+          });
           events.forEach((el: any) => {
             const bo: any = el.businessObject;
             const defs = Array.isArray(bo.eventDefinitions) ? bo.eventDefinitions : [];
