@@ -417,7 +417,8 @@ async function openFile(file: File) {
     try {
       const raw = (e.target as FileReader).result as string;
       const pre = prefixVariableChildrenForImport(raw);
-      await modeler.importXML(pre);
+      const expanded = expandSubProcessShapesInDI(pre);
+      await modeler.importXML(expanded);
       sanitizeModel();
       modeler.get('canvas').zoom('fit-viewport', 'auto');
       setStatus(`Geladen: ${file.name}`);
@@ -548,6 +549,38 @@ function wrapSendSynchronouslyInCDATA(xml: string): string {
       if (!trimmed) return _m;
       return `${open}<![CDATA[${trimmed}]]>${close}`;
     });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure all SubProcesses are expanded on the canvas by setting BPMNShape@isExpanded="true" for their DI shapes
+function expandSubProcessShapesInDI(xml: string): string {
+  try {
+    let out = xml;
+    // collect all subprocess IDs (prefixed or unprefixed)
+    const ids = new Set<string>();
+    const reSub = /<([\w-]+:)?subProcess\b[^>]*\bid="([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = reSub.exec(out))) {
+      ids.add(m[2]);
+    }
+    if (!ids.size) return out;
+    // for each id, force BPMNShape isExpanded="true"
+    ids.forEach((id) => {
+      const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const reShape = new RegExp(`(<([\\w-]+:)?BPMNShape\\b[^>]*\\bbpmnElement="${esc}"[^>]*)(/?>)`, 'g');
+      out = out.replace(reShape, (full, open, _ns, end) => {
+        if (/\bisExpanded\s*=\s*"true"/i.test(open)) return full; // already true
+        if (/\bisExpanded\s*=\s*"(?:true|false)"/i.test(open)) {
+          open = open.replace(/\bisExpanded\s*=\s*"(?:true|false)"/i, 'isExpanded="true"');
+          return open + end;
+        }
+        // inject attribute before end
+        return `${open} isExpanded="true"${end}`;
+      });
+    });
+    return out;
   } catch {
     return xml;
   }
