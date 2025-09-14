@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/1",
+  "package": {
+    "productName": "Flowable BPMN Editor",
+    "version": "0.0.0"
+  },
+  "build": {
+    "beforeDevCommand": "vite",
+    "beforeBuildCommand": "vite build",
+    "devPath": "http://localhost:5173/hosts/browser/",
+    "distDir": "../dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "shell": { "all": true },
+      "dialog": { "open": true, "save": true },
+      "fs": { "all": true }
+    },
+    "windows": [
+      {
+        "title": "BPMN Editor (Tauri Host)",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "bundle": {
+      "identifier": "com.example.fleditorbpmn"
+    }
+  }
+}
+

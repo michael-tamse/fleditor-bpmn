@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:host": "vite --open /hosts/browser/index.html",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^2.2.0",
