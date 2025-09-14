@@ -783,14 +783,23 @@ function ErrorCodeEntry(props: { element: BPMNElement }) {
   const setValue = (value: string) => {
     if (!ed) return;
     const v = (value || '').trim();
+    const ref = ed.get ? ed.get('errorRef') : (ed as any).errorRef;
     if (!v) {
+      // Clear reference but do not create/delete errors here
       modeling.updateModdleProperties(element, ed, { errorRef: undefined });
       return;
     }
-    let ref = ed.get ? ed.get('errorRef') : (ed as any).errorRef;
+    if (ref) {
+      // Update existing referenced Error's code and name; avoid creating new <error> per keystroke
+      const currentCode = ref.get ? ref.get('errorCode') : (ref as any).errorCode;
+      if (currentCode !== v) {
+        modeling.updateModdleProperties(element, ref, { errorCode: v, name: v });
+      }
+      return;
+    }
+    // No current reference: try to reuse existing Error by code, else create once
     const defs = getDefinitions(bo);
     const rootEls = (defs && (defs.get ? defs.get('rootElements') : defs.rootElements)) || [];
-    // try reuse existing Error with same errorCode
     let target = rootEls.find((re: any) => re && re.$type === 'bpmn:Error' && ((re.get ? re.get('errorCode') : re.errorCode) === v));
     if (!target) {
       target = bpmnFactory.create('bpmn:Error', { id: 'Error_' + Math.random().toString(36).slice(2, 10), name: v, errorCode: v });
@@ -798,9 +807,7 @@ function ErrorCodeEntry(props: { element: BPMNElement }) {
         modeling.updateModdleProperties(element, defs, { rootElements: rootEls.concat([ target ]) });
       }
     }
-    if (!ref || ref !== target) {
-      modeling.updateModdleProperties(element, ed, { errorRef: target });
-    }
+    modeling.updateModdleProperties(element, ed, { errorRef: target });
   };
   return TextFieldEntry({ id: 'bpmn-error-code', element, label: translate ? translate('Error code') : 'Error code', getValue, setValue, debounce });
 }
@@ -1762,7 +1769,7 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             }
           }
         }
-        // Error Boundary: move Code to General, add error variable fields and Error mapping
+        // Error Boundary: add our own Error code entry to General, add error variable fields and Error mapping
         if (isErrorBoundaryEvent(element)) {
           const idxGen = groups.findIndex((g: any) => g && g.id === 'general');
           const general = idxGen >= 0 ? groups[idxGen] : null;
@@ -1778,34 +1785,21 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             });
           });
           const idxErr = findErrIdx();
-          let codeEntry: any = null;
           if (idxErr >= 0) {
-            const errGroup = groups[idxErr];
-            if (Array.isArray(errGroup.entries)) {
-              const codeIdx = errGroup.entries.findIndex((e: any) => {
-                const lbl = String(e && e.label || '').toLowerCase();
-                const id = String(e && e.id || '').toLowerCase();
-                return lbl === 'code' || /\bcode\b/.test(lbl) || /code/.test(id);
-              });
-              if (codeIdx >= 0) {
-                codeEntry = errGroup.entries.splice(codeIdx, 1)[0];
-              }
-            }
-            // remove default Error group entirely
+            // remove default Error group entirely (we provide our own entries)
             groups.splice(idxErr, 1);
           }
           if (general && Array.isArray(general.entries)) {
             let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
             if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
             let offset = 1;
-            // insert Error code
-            if (codeEntry) {
-              general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, codeEntry);
-            } else {
+            // insert our stable Error code entry (avoid reusing default "Code" entry to keep label stable)
+            const alreadyHasErrorCode = general.entries.some((e: any) => e && e.id === 'bpmn-error-code');
+            if (!alreadyHasErrorCode) {
               const def = { id: 'bpmn-error-code', component: ErrorCodeEntry, isEdited: isTextFieldEntryEdited };
               general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, def);
+              offset += 1;
             }
-            offset += 1;
             // add variable entries
             const want = [
               { id: 'flowable-errorDef-errorVariableName', component: ErrorDef_VariableNameEntry, isEdited: isTextFieldEntryEdited },

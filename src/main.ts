@@ -488,7 +488,8 @@ async function saveXML() {
     const withoutMessageDefs = stripMessageEventDefinitionsInXML(withStartCfgCdata);
     const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
     const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedSendTasks);
-    const withFlowableHeader = toFlowableDefinitionHeader(withErrorRefCodes);
+    const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
+    const withFlowableHeader = toFlowableDefinitionHeader(reconciledErrors);
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -706,6 +707,68 @@ function mapErrorRefToErrorCodeOnExport(xml: string): string {
       if (!code) return full;
       return `${pre}${code}${post}`;
     });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure error definitions match errorRef usage:
+// - Remove unreferenced <bpmn:error> elements
+// - For each errorRef without a matching <bpmn:error id="..."> create one
+//   with id=name=errorCode=errorRef value
+function reconcileErrorDefinitionsOnExport(xml: string): string {
+  try {
+    // 1) Collect referenced errorRef values (after we rewrote them to codes)
+    const refs = new Set<string>();
+    const reErrRef = /<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*"([^"]+)"/gi;
+    let m: RegExpExecArray | null;
+    while ((m = reErrRef.exec(xml))) {
+      const ref = (m[2] || '').trim();
+      if (ref) refs.add(ref);
+    }
+
+    // 2) Collect existing error IDs
+    const existing = new Set<string>();
+    const collectId = (attrs: string) => {
+      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs || '');
+      return idMatch ? idMatch[1] : '';
+    };
+    const reErrSelf = /<([\w-]+:)?error\b([^>]*)\/>/gi;
+    while ((m = reErrSelf.exec(xml))) {
+      const id = collectId(m[2]);
+      if (id) existing.add(id);
+    }
+    const reErrPair = /<([\w-]+:)?error\b([^>]*)>([\s\S]*?)<\/(?:[\w-]+:)?error>/gi;
+    while ((m = reErrPair.exec(xml))) {
+      const id = collectId(m[2]);
+      if (id) existing.add(id);
+    }
+
+    // 3) Remove unreferenced errors
+    const shouldKeep = (attrs: string) => {
+      const id = collectId(attrs);
+      return id && refs.has(id);
+    };
+    let out = xml.replace(reErrSelf, (full, _ns, attrs) => (shouldKeep(attrs) ? full : ''));
+    out = out.replace(reErrPair, (full, _ns, attrs) => (shouldKeep(attrs) ? full : ''));
+
+    // 4) Inject missing errors before </definitions>
+    const missing = Array.from(refs).filter((id) => !existing.has(id));
+    if (missing.length) {
+      const defMatch = /<([\w-]+:)?definitions\b[^>]*>/i.exec(out);
+      const ns = defMatch && defMatch[1] ? defMatch[1] : 'bpmn:';
+      const payload = missing
+        .map((id) => `  <${ns}error id="${id}" name="${id}" errorCode="${id}" />`)
+        .join('\n');
+      const reClose = /(<\/(?:[\w-]+:)?definitions>)/i;
+      if (reClose.test(out)) {
+        out = out.replace(reClose, `${payload}\n$1`);
+      } else {
+        out += `\n${payload}\n`;
+      }
+    }
+
+    return out;
   } catch {
     return xml;
   }
