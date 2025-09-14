@@ -26,8 +26,8 @@ Note: Large bundle warnings are expected; not a blocker.
 - `styles.css`, `index.html`: Base UI shell.
 
 Quick anchors (open in IDE):
-- `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Variable Aggregations.
-- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask mapping, icon helpers).
+- `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
+- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers).
 
 ## Properties Panel Customizations
 - General group: adds a visual separator after `ID` if extra fields are present.
@@ -37,11 +37,39 @@ Quick anchors (open in IDE):
   - spacer, then `isForCompensation` and (for CallActivity) `flowable:completeAsync`.
   - For ServiceTask with `flowable:type="external-worker"` the four async/exclusive checkboxes and spacer are hidden.
 
+### Error Events
+- Error Boundary: default Error group is removed. General shows, directly after `ID`:
+  - `Error code`: binds to `errorEventDefinition.errorRef` (UI updates existing `<bpmn:error>` instead of creating per keystroke).
+  - `Error variable name|transient|local scope`: stored on the `bpmn:ErrorEventDefinition` as Flowable attributes.
+  - New group `Error mapping`: list UI over `flowable:in` with entries:
+    - `Source` choice: `errorCode` | `errorMessage` | `error`
+    - `Target variable` text
+    - `Transient` checkbox
+- Error Start Event: treated like Error Boundary (same fields and `Error mapping`).
+- Message group removal: default Message group is hidden for Message Start/ICE/Message Boundary (we manage with Flowable sections); Error events retain their own custom UI.
+
+### Message Boundary Events
+- The three message sections (`Event key`, `Correlation parameter`, `Inbound event mapping`) are shown only for Message Boundary Events (not for Timer/Error boundaries).
+
 ### Service Task
 - Implementation selector in General: `Delegate Expression` vs `External`.
   - Delegate Expression → `flowable:delegateExpression` text field.
   - External → `Topic` text field bound to `flowable:topic`.
   - Switching to External sets `flowable:type="external-worker"`, `flowable:exclusive=false` and clears `flowable:delegateExpression`, `flowable:(async|asyncLeave|asyncLeaveExclusive)`.
+  - Export: writes pretty `extensionElements` with Design stencils for External Worker tasks:
+    - `<design:stencilid><![CDATA[ExternalWorkerTask]]></design:stencilid>`
+    - `<design:stencilsuperid><![CDATA[Task]]></design:stencilsuperid>`
+
+### BusinessRuleTask (Flowable DMN)
+- Import view: `bpmn:ServiceTask[flowable:type=dmn]` is shown as `bpmn:BusinessRuleTask`.
+- General (after `ID`):
+  - `Decision table reference` → `<flowable:field name="decisionTableReferenceKey"><flowable:string><![CDATA[value]]></flowable:string></flowable:field>`
+  - `Throw error if no rules were hit` (checkbox) → `<flowable:field name="decisionTaskThrowErrorOnNoHits"><flowable:string><![CDATA[true|false]]></flowable:string></flowable:field>`
+- Defaults (no UI; ensured on save):
+  - `<flowable:field name="fallbackToDefaultTenant"><flowable:string><![CDATA[true]]></flowable:string></flowable:field>`
+  - `<flowable:field name="sameDeployment"><flowable:string><![CDATA[true]]></flowable:string></flowable:field>`
+  - `<flowable:decisionReferenceType><![CDATA[decisionTable]]></flowable:decisionReferenceType>`
+  - Export view: `bpmn:BusinessRuleTask` → `bpmn:ServiceTask[flowable:type=dmn]` (defaults and fields preserved).
 
 ### Send Task (message send-event)
 - General: `Event key (type)` → `<flowable:eventType>` (CDATA).
@@ -94,6 +122,7 @@ In `src/main.ts` we prune unsupported elements from palette, context pad, replac
 - Logging: Wrap `console.debug` in try/catch to avoid errors; keep messages short.
 - Registration priority: Properties provider registers with priority `500` (after defaults).
 - Spacers: Use a dedicated component (thin top border, small spacing) to visually separate logical sections within a group.
+ - Hooks: do not call `useService(...)` inside `getGroups` except within entry components. Mutations that need services should occur inside entry setters or in export helpers.
 
 ## Agent Operating Procedure
 - Planning: For multi-step tasks, use the Codex plan tool and keep steps concise.
@@ -145,9 +174,24 @@ This guide is intentionally concise. When in doubt, prefer small, targeted chang
   - Add `bpmn:MessageEventDefinition` to Start/IntermediateCatch/Boundary if Flowable event metadata exists (for icon rendering).
   - Expand all SubProcess DI shapes (`bpmndi:BPMNShape[isExpanded=true]`).
   - Map `bpmn:ServiceTask[flowable:type=send-event]` to SendTask for display.
+  - Map `bpmn:ServiceTask[flowable:type=dmn]` to BusinessRuleTask for display.
+  - Normalize Flowable error start/boundary `errorRef` values expressed as codes:
+    - If `errorRef="code"` and `<bpmn:error errorCode="code">` exists, rewrite reference to that error `id`.
+    - If missing, create a `<bpmn:error id=name=errorCode="code"/>` and reference it.
 - Export helpers (string-level XML rewrites; model remains intact):
-  - Wrap bodies in CDATA for condition expressions, `flowable:eventType`, `flowable:sendSynchronously`, and `flowable:startEventCorrelationConfiguration`.
+  - Wrap bodies in CDATA for condition expressions, `flowable:eventType`, `flowable:sendSynchronously`, `flowable:startEventCorrelationConfiguration`, `flowable:string`, and `flowable:decisionReferenceType`.
   - Ensure message-start correlation configuration and required defaults (Receive/Boundary/Start Correlation, SendTask defaults, systemChannel) are present.
   - Remove `messageEventDefinition` only from the serialized XML for Start/ICE/Boundary (flowable event-registry style), keep it in-memory for icons.
   - Map SendTask → ServiceTask with `flowable:type="send-event"` in XML.
+  - Map BusinessRuleTask → ServiceTask with `flowable:type="dmn"` in XML.
+  - External Worker: ensure pretty `extensionElements` contain the Design stencils (`stencilid=ExternalWorkerTask`, `stencilsuperid=Task`).
+  - Error Events: write `errorRef` as `errorCode`; reconcile error definitions by removing unreferenced `<bpmn:error>` and adding missing ones (`id=name=errorCode=value`).
   - Normalize Flowable variable aggregation definitions to unprefixed `<variable/>` in XML.
+
+## Moddle Extensions (Flowable)
+- Added types used by the UI/export:
+  - `flowable:String` (body CDATA)
+  - `flowable:Field` (attributes: `name`, child: `string`)
+  - `flowable:DecisionReferenceType` (body CDATA)
+  - `flowable:In.transient:Boolean` (attribute on mappings)
+  - Error EventDefinition props: `flowable:errorVariableName|errorVariableTransient|errorVariableLocalScope`
