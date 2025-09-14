@@ -79,8 +79,16 @@ function isErrorBoundaryEvent(element: BPMNElement): boolean {
   return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition');
 }
 
+function isErrorStartEvent(element: BPMNElement): boolean {
+  if (!isStartEvent(element)) return false;
+  const bo = element.businessObject;
+  const eventDefinitions = bo && bo.eventDefinitions;
+  if (!Array.isArray(eventDefinitions)) return false;
+  return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition');
+}
+
 function getErrorEventDefinition(element: BPMNElement): any | null {
-  if (!element || !isErrorBoundaryEvent(element)) return null;
+  if (!element) return null;
   const bo = element.businessObject;
   const eventDefinitions = (bo && bo.eventDefinitions) || [];
   return eventDefinitions.find((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition') || null;
@@ -1738,6 +1746,44 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           }
         }
       }
+      // Error StartEvent customizations: treat like Error Boundary (add Error code + error variable fields, and Error mapping)
+      if (isStartEvent(element) && isErrorStartEvent(element)) {
+        const idxGen = groups.findIndex((g: any) => g && g.id === 'general');
+        const general = idxGen >= 0 ? groups[idxGen] : null;
+        if (general && Array.isArray(general.entries)) {
+          let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+          if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+          let offset = 1;
+          // Error code (our stable entry)
+          const hasErrCode = general.entries.some((e: any) => e && e.id === 'bpmn-error-code');
+          if (!hasErrCode) {
+            const def = { id: 'bpmn-error-code', component: ErrorCodeEntry, isEdited: isTextFieldEntryEdited };
+            general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, def);
+            offset += 1;
+          }
+          // Error variables
+          const want = [
+            { id: 'flowable-errorDef-errorVariableName', component: ErrorDef_VariableNameEntry, isEdited: isTextFieldEntryEdited },
+            { id: 'flowable-errorDef-errorVariableTransient', component: ErrorDef_VariableTransientEntry, isEdited: isCheckboxEntryEdited },
+            { id: 'flowable-errorDef-errorVariableLocalScope', component: ErrorDef_VariableLocalScopeEntry, isEdited: isCheckboxEntryEdited }
+          ];
+          want.forEach((w) => {
+            const exists = general.entries.some((e: any) => e && e.id === w.id);
+            if (!exists) {
+              general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, w);
+              offset += 1;
+            }
+          });
+        }
+        // Add Error mapping section after General
+        const existsMap = groups.some((g: any) => g && g.id === 'flowable-error-mapping');
+        if (!existsMap) {
+          const mapGroup = createErrorMappingGroup(element);
+          const afterGen = (general ? groups.indexOf(general) : groups.findIndex((g: any) => g && g.id === 'general'));
+          const insertAt = afterGen >= 0 ? afterGen + 1 : groups.length;
+          groups.splice(insertAt, 0, mapGroup);
+        }
+      }
       // BoundaryEvent customizations: Message vs Error
       if (isBoundaryEvent(element)) {
         // Message Boundary: show EventType, Correlation and Inbound mapping
@@ -1951,8 +1997,8 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         });
         if (idx >= 0) groups.splice(idx, 1);
       }
-      // Remove default Error group for Error Boundary Events
-      if (isBoundaryEvent(element) && isErrorBoundaryEvent(element)) {
+      // Remove default Error group for Error Boundary and Error Start Events (we provide our own UI)
+      if ((isBoundaryEvent(element) && isErrorBoundaryEvent(element)) || (isStartEvent(element) && isErrorStartEvent(element))) {
         const idxErr = groups.findIndex((g: any) => {
           const id = String(g && g.id || '').toLowerCase();
           const label = String(g && g.label || '').toLowerCase();
