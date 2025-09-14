@@ -11,11 +11,15 @@ This document guides agents (and contributors) working on this BPMN editor. It c
 - Core: `bpmn-js`, `bpmn-js-properties-panel`, `@bpmn-io/properties-panel` (Preact-based entries)
 - Build: Vite (Node 18+ recommended)
 - Language: TypeScript (ES modules)
+ - Sidecar: Lightweight protocol + transports (DOM/postMessage) for embedding in Angular/Tauri/Browser hosts
 
 ## Run & Build
 - Dev: `npm run dev`
+- Host Demo (Browser): `npm run dev:host` → opens `/hosts/browser/`
 - Build: `npm run build`
 - Preview: `npm run preview`
+- Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI)
+- Tauri Build: `npm run build:tauri`
 
 Note: Large bundle warnings are expected; not a blocker.
 
@@ -24,10 +28,50 @@ Note: Large bundle warnings are expected; not a blocker.
 - `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types) including Event/Mapping/Variable Aggregation/Start Correlation types.
 - `src/flowable-properties-provider.ts`: Custom properties provider logic. Adds/adjusts entries and groups and integrates with the default provider.
 - `styles.css`, `index.html`: Base UI shell.
+ - Sidecar (component ↔ host interface):
+   - `src/sidecar/shared/protocol.ts`: PROTOCOL_ID/Version, message types (handshake, req/res, events, error), capabilities.
+   - `src/sidecar/transports/dom.ts`: DOM CustomEvent transport (Angular/same-window).
+   - `src/sidecar/transports/postMessage.ts`: postMessage transport (iframe/parent).
+   - `src/sidecar/transports/memory.ts`: Memory transport (tests).
+   - `src/sidecar/bridge.ts`: Thin request/response/event bridge with timeouts and handlers.
+ - Browser Host Demo:
+   - `hosts/browser/index.html`: Host UI (buttons, toggles) + iframe embedding the editor.
+   - `hosts/browser/main.ts`: Host logic (handshake ack, ui ops, doc.load/save via downloads).
 
 Quick anchors (open in IDE):
 - `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
-- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers).
+- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save` fallbacks.
+
+## Sidecar Integration
+- Overview: The editor runs standalone, but can integrate with an external host (Angular, Tauri, Browser) via a versioned, bidirectional interface.
+- Protocol: `bpmn-sidecar` with `handshake:init/ack`, `req/res`, `event`, `error`. Capabilities declare available host features and operations.
+- Supported ops (initial):
+  - `doc.load` (Comp → Host): host returns BPMN XML string.
+  - `doc.save` (Comp → Host): host persists XML (demo triggers browser download).
+  - `ui.setPropertyPanel` (Host → Comp): show/hide property panel.
+  - `ui.setMenubar` (Host → Comp): show/hide editor menubar.
+- Events (Comp → Host): `ui.state` (menubar/propertyPanel flags), `doc.changed` (dirty hint).
+- Transports: DOM CustomEvents (same window), postMessage (iframe). Component auto-detects iframe and prefers postMessage.
+- Component wiring (in `src/main.ts`):
+  - Init at startup; handshake attempts are non-blocking (editor works without host).
+  - Open/Save buttons use host ops if connected, else fall back to file dialog/download.
+  - UI requests update DOM and emit `ui.state` back to host.
+
+### Run the Browser Host Demo
+- Dev: `npm run dev`
+- Open Host UI: `http://localhost:5173/hosts/browser/`
+- Flow:
+  - The host iframe-loads `/index.html` (the editor) and sends `handshake:ack`.
+  - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
+  - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
+  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `diagram-from-editor.bpmn` herunter.
+
+### Host Security
+- For postMessage hosts, add origin checks on the host side. The demo uses `'*'` for simplicity in dev.
+
+### Adding New Ops
+- Extend `OperationName` union in `src/sidecar/shared/protocol.ts` or use string ops for forward-compat.
+- Register handlers via `bridge.onRequest(op, handler)` in the host and call via `bridge.request(op, payload)` from the component (and vice versa if needed).
 
 ## Properties Panel Customizations
 - General group: adds a visual separator after `ID` if extra fields are present.
