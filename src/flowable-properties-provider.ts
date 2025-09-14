@@ -38,6 +38,14 @@ function isBoundaryEvent(element: BPMNElement): boolean {
   return /BoundaryEvent$/.test(getType(element));
 }
 
+function isMessageBoundaryEvent(element: BPMNElement): boolean {
+  if (!isBoundaryEvent(element)) return false;
+  const bo = element.businessObject;
+  const eventDefinitions = bo && bo.eventDefinitions;
+  if (!Array.isArray(eventDefinitions)) return false;
+  return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:MessageEventDefinition');
+}
+
 function isCallActivity(element: BPMNElement): boolean {
   return /CallActivity$/.test(getType(element));
 }
@@ -61,6 +69,30 @@ function isTimerBoundaryEvent(element: BPMNElement): boolean {
   const eventDefinitions = bo && bo.eventDefinitions;
   if (!Array.isArray(eventDefinitions)) return false;
   return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:TimerEventDefinition');
+}
+
+function isErrorBoundaryEvent(element: BPMNElement): boolean {
+  if (!isBoundaryEvent(element)) return false;
+  const bo = element.businessObject;
+  const eventDefinitions = bo && bo.eventDefinitions;
+  if (!Array.isArray(eventDefinitions)) return false;
+  return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition');
+}
+
+function getErrorEventDefinition(element: BPMNElement): any | null {
+  if (!element || !isErrorBoundaryEvent(element)) return null;
+  const bo = element.businessObject;
+  const eventDefinitions = (bo && bo.eventDefinitions) || [];
+  return eventDefinitions.find((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition') || null;
+}
+
+function getDefinitions(bo: any): any | null {
+  let cur = bo;
+  while (cur && cur.$parent) {
+    if (cur.$type === 'bpmn:Definitions') return cur;
+    cur = cur.$parent;
+  }
+  return null;
 }
 
 function isSequenceFlow(element: BPMNElement): boolean {
@@ -654,6 +686,206 @@ function createInboundEventMappingGroup(_element: BPMNElement) {
   return {
     id: 'flowable-inbound-event-mapping',
     component: InboundEventMappingGroupComponent
+  } as any;
+}
+
+// Error Boundary: Flowable error variable fields
+function ErrorVariableNameEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => (bo.get ? bo.get('flowable:errorVariableName') : (bo as any)['flowable:errorVariableName']) || '';
+  const setValue = (value: string) => modeling.updateProperties(element, { 'flowable:errorVariableName': (value || '').trim() || undefined });
+  return TextFieldEntry({ id: 'flowable-errorVariableName', element, label: translate ? translate('Error variable name') : 'Error variable name', getValue, setValue, debounce });
+}
+
+function ErrorVariableTransientEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => !!(bo.get ? bo.get('flowable:errorVariableTransient') : (bo as any)['flowable:errorVariableTransient']);
+  const setValue = (val: boolean) => modeling.updateProperties(element, { 'flowable:errorVariableTransient': !!val });
+  return CheckboxEntry({ id: 'flowable-errorVariableTransient', element, label: translate ? translate('Error variable transient') : 'Error variable transient', getValue, setValue });
+}
+
+function ErrorVariableLocalScopeEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const element = props.element;
+  const bo = element.businessObject;
+  const getValue = () => !!(bo.get ? bo.get('flowable:errorVariableLocalScope') : (bo as any)['flowable:errorVariableLocalScope']);
+  const setValue = (val: boolean) => modeling.updateProperties(element, { 'flowable:errorVariableLocalScope': !!val });
+  return CheckboxEntry({ id: 'flowable-errorVariableLocalScope', element, label: translate ? translate('Error variable local scope') : 'Error variable local scope', getValue, setValue });
+}
+
+function createErrorVariablesGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-error-variables',
+    label: 'Error variables',
+    entries: [
+      { id: 'flowable-errorVariableName', component: ErrorVariableNameEntry, isEdited: isTextFieldEntryEdited },
+      { id: 'flowable-errorVariableTransient', component: ErrorVariableTransientEntry, isEdited: isCheckboxEntryEdited },
+      { id: 'flowable-errorVariableLocalScope', component: ErrorVariableLocalScopeEntry, isEdited: isCheckboxEntryEdited }
+    ],
+    component: Group
+  } as any;
+}
+
+// --- Error Boundary: entries bound to ErrorEventDefinition ---
+function ErrorDef_VariableNameEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const ed = getErrorEventDefinition(element);
+  const getValue = () => (ed && (ed.get ? ed.get('flowable:errorVariableName') : (ed as any)['flowable:errorVariableName'])) || '';
+  const setValue = (value: string) => { if (ed) modeling.updateModdleProperties(element, ed, { 'flowable:errorVariableName': (value || '').trim() || undefined }); };
+  return TextFieldEntry({ id: 'flowable-errorDef-errorVariableName', element, label: translate ? translate('Error variable name') : 'Error variable name', getValue, setValue, debounce });
+}
+
+function ErrorDef_VariableTransientEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const ed = getErrorEventDefinition(element);
+  const getValue = () => !!(ed && (ed.get ? ed.get('flowable:errorVariableTransient') : (ed as any)['flowable:errorVariableTransient']));
+  const setValue = (val: boolean) => { if (ed) modeling.updateModdleProperties(element, ed, { 'flowable:errorVariableTransient': !!val }); };
+  return CheckboxEntry({ id: 'flowable-errorDef-errorVariableTransient', element, label: translate ? translate('Error variable transient') : 'Error variable transient', getValue, setValue });
+}
+
+function ErrorDef_VariableLocalScopeEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const ed = getErrorEventDefinition(element);
+  const getValue = () => !!(ed && (ed.get ? ed.get('flowable:errorVariableLocalScope') : (ed as any)['flowable:errorVariableLocalScope']));
+  const setValue = (val: boolean) => { if (ed) modeling.updateModdleProperties(element, ed, { 'flowable:errorVariableLocalScope': !!val }); };
+  return CheckboxEntry({ id: 'flowable-errorDef-errorVariableLocalScope', element, label: translate ? translate('Error variable local scope') : 'Error variable local scope', getValue, setValue });
+}
+
+// Fallback Error code editor if default entry not available; binds to ErrorEventDefinition.errorRef
+function ErrorCodeEntry(props: { element: BPMNElement }) {
+  const { element } = props;
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const ed = getErrorEventDefinition(element);
+  const bo = element.businessObject;
+  const getValue = () => {
+    const ref = ed && (ed.get ? ed.get('errorRef') : (ed as any).errorRef);
+    const code = ref && (ref.get ? ref.get('errorCode') : (ref as any).errorCode);
+    return code || '';
+  };
+  const setValue = (value: string) => {
+    if (!ed) return;
+    const v = (value || '').trim();
+    if (!v) {
+      modeling.updateModdleProperties(element, ed, { errorRef: undefined });
+      return;
+    }
+    let ref = ed.get ? ed.get('errorRef') : (ed as any).errorRef;
+    const defs = getDefinitions(bo);
+    const rootEls = (defs && (defs.get ? defs.get('rootElements') : defs.rootElements)) || [];
+    // try reuse existing Error with same errorCode
+    let target = rootEls.find((re: any) => re && re.$type === 'bpmn:Error' && ((re.get ? re.get('errorCode') : re.errorCode) === v));
+    if (!target) {
+      target = bpmnFactory.create('bpmn:Error', { id: 'Error_' + Math.random().toString(36).slice(2, 10), name: v, errorCode: v });
+      if (defs) {
+        modeling.updateModdleProperties(element, defs, { rootElements: rootEls.concat([ target ]) });
+      }
+    }
+    if (!ref || ref !== target) {
+      modeling.updateModdleProperties(element, ed, { errorRef: target });
+    }
+  };
+  return TextFieldEntry({ id: 'bpmn-error-code', element, label: translate ? translate('Error code') : 'Error code', getValue, setValue, debounce });
+}
+
+// --- Error mapping group (flowable:in list on BoundaryEvent) ---
+function getFlowableIns(bo: any) {
+  return getFlowableMappings(bo, 'In');
+}
+
+function addFlowableIn(element: any, bpmnFactory: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const mapping = bpmnFactory.create('flowable:In', { source: 'errorCode' });
+  const newValues = values.concat([ mapping ]);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function removeFlowableIn(element: any, mapping: any, modeling: any) {
+  const bo = element.businessObject;
+  const ext = getExtensionElements(bo);
+  if (!ext) return;
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  const newValues = values.filter((v: any) => v !== mapping);
+  modeling.updateModdleProperties(element, ext, { values: newValues });
+}
+
+function ErrorInSourceEntry(props: { element: BPMNElement, mapping: any, id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = () => (mapping.get ? mapping.get('source') : mapping.source) || '';
+  const setValue = (val: 'errorCode' | 'errorMessage' | 'error') => modeling.updateModdleProperties(element, mapping, { source: val });
+  const getOptions = () => ([
+    { label: translate ? translate('Error code') : 'Error code', value: 'errorCode' },
+    { label: translate ? translate('Error message') : 'Error message', value: 'errorMessage' },
+    { label: translate ? translate('BPMN Error') : 'BPMN Error', value: 'error' }
+  ]);
+  return SelectEntry({ element, id, label: translate ? translate('Source') : 'Source', getValue, setValue, getOptions });
+}
+
+function ErrorInTargetEntry(props: { element: BPMNElement, mapping: any, id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (mapping.get ? mapping.get('target') : mapping.target) || '';
+  const setValue = (value: string) => modeling.updateModdleProperties(element, mapping, { target: (value || '').trim() || undefined });
+  return TextFieldEntry({ id, element, label: translate ? translate('Target variable') : 'Target variable', getValue, setValue, debounce });
+}
+
+function ErrorInTransientEntry(props: { element: BPMNElement, mapping: any, id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = () => !!(mapping.get ? mapping.get('transient') : (mapping as any).transient);
+  const setValue = (val: boolean) => modeling.updateModdleProperties(element, mapping, { transient: !!val });
+  return CheckboxEntry({ id, element, label: translate ? translate('Transient') : 'Transient', getValue, setValue });
+}
+
+function ErrorMappingGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const bo = element.businessObject;
+  const items = getFlowableIns(bo).map((m: any, idx: number) => {
+    const lbl = (m.get ? (m.get('target') || m.get('source')) : (m.target || m.source)) || '';
+    const entries = [
+      { id: `flowable-error-in-${idx}-source`, mapping: m, component: ErrorInSourceEntry, isEdited: isSelectEntryEdited },
+      { id: `flowable-error-in-${idx}-target`, mapping: m, component: ErrorInTargetEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-error-in-${idx}-transient`, mapping: m, component: ErrorInTransientEntry, isEdited: isCheckboxEntryEdited }
+    ];
+    const remove = () => removeFlowableIn(element, m, modeling);
+    return { id: `flowable-error-in-item-${idx}`, label: lbl, entries, remove, autoFocusEntry: `flowable-error-in-${idx}-source` };
+  });
+  const add = (e?: any) => { try { e && e.stopPropagation && e.stopPropagation(); } catch {} addFlowableIn(element, bpmnFactory, modeling); };
+  return h(ListGroup as any, { id, label: label || (translate ? translate('Error mapping') : 'Error mapping'), element, items, add, shouldSort: false });
+}
+
+function createErrorMappingGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-error-mapping',
+    label: 'Error mapping',
+    component: ErrorMappingGroupComponent
   } as any;
 }
 // ------------- Variable Aggregations helpers -------------
@@ -1499,10 +1731,10 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
           }
         }
       }
-      // BoundaryEvent customizations (same as ICE), skip if timer
+      // BoundaryEvent customizations: Message vs Error
       if (isBoundaryEvent(element)) {
-        if (!isTimerBoundaryEvent(element)) {
-          // General: add Event Type under ID
+        // Message Boundary: show EventType, Correlation and Inbound mapping
+        if (isMessageBoundaryEvent(element)) {
           const general = groups && groups.find((g) => g && g.id === 'general');
           if (general && Array.isArray(general.entries)) {
             const exists = general.entries.some((e: any) => e && e.id === 'flowable-eventType');
@@ -1513,16 +1745,14 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
               if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
             }
           }
-          // Group: Correlation parameter (before Inbound mapping)
-          const existsCorr = groups && groups.some((g) => g && g.id === 'flowable-correlation-parameters');
-          if (!existsCorr) {
+          // Correlation parameter group
+          if (!groups.some((g) => g && g.id === 'flowable-correlation-parameters')) {
             const corr = createCorrelationParametersGroup(element);
             const idxGen = groups.findIndex((g) => g && g.id === 'general');
             if (idxGen >= 0) groups.splice(idxGen + 1, 0, corr); else groups.push(corr);
           }
-          // Group: Inbound event mapping after Correlation parameter (or General if no corr)
-          const existsInBnd = groups && groups.some((g) => g && g.id === 'flowable-inbound-event-mapping');
-          if (!existsInBnd) {
+          // Inbound event mapping group
+          if (!groups.some((g) => g && g.id === 'flowable-inbound-event-mapping')) {
             const inGroup = createInboundEventMappingGroup(element);
             const idxCorr = groups.findIndex((g) => g && g.id === 'flowable-correlation-parameters');
             if (idxCorr >= 0) groups.splice(idxCorr + 1, 0, inGroup);
@@ -1530,6 +1760,75 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
               const idxGen = groups.findIndex((g) => g && g.id === 'general');
               if (idxGen >= 0) groups.splice(idxGen + 1, 0, inGroup); else groups.push(inGroup);
             }
+          }
+        }
+        // Error Boundary: move Code to General, add error variable fields and Error mapping
+        if (isErrorBoundaryEvent(element)) {
+          const idxGen = groups.findIndex((g: any) => g && g.id === 'general');
+          const general = idxGen >= 0 ? groups[idxGen] : null;
+          const findErrIdx = () => groups.findIndex((g: any) => {
+            const id = String(g && g.id || '').toLowerCase();
+            const label = String(g && g.label || '').toLowerCase();
+            if (id === 'error' || id === 'errorgroup' || /\berror\b/.test(label)) return true;
+            const entries = Array.isArray(g && g.entries) ? g.entries : [];
+            return entries.some((e: any) => {
+              const lid = String(e && e.id || '').toLowerCase();
+              const llb = String(e && e.label || '').toLowerCase();
+              return /error/.test(lid) || /\berror\b/.test(llb);
+            });
+          });
+          const idxErr = findErrIdx();
+          let codeEntry: any = null;
+          if (idxErr >= 0) {
+            const errGroup = groups[idxErr];
+            if (Array.isArray(errGroup.entries)) {
+              const codeIdx = errGroup.entries.findIndex((e: any) => {
+                const lbl = String(e && e.label || '').toLowerCase();
+                const id = String(e && e.id || '').toLowerCase();
+                return lbl === 'code' || /\bcode\b/.test(lbl) || /code/.test(id);
+              });
+              if (codeIdx >= 0) {
+                codeEntry = errGroup.entries.splice(codeIdx, 1)[0];
+              }
+            }
+            // remove default Error group entirely
+            groups.splice(idxErr, 1);
+          }
+          if (general && Array.isArray(general.entries)) {
+            let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+            if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+            let offset = 1;
+            // insert Error code
+            if (codeEntry) {
+              general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, codeEntry);
+            } else {
+              const def = { id: 'bpmn-error-code', component: ErrorCodeEntry, isEdited: isTextFieldEntryEdited };
+              general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, def);
+            }
+            offset += 1;
+            // add variable entries
+            const want = [
+              { id: 'flowable-errorDef-errorVariableName', component: ErrorDef_VariableNameEntry, isEdited: isTextFieldEntryEdited },
+              { id: 'flowable-errorDef-errorVariableTransient', component: ErrorDef_VariableTransientEntry, isEdited: isCheckboxEntryEdited },
+              { id: 'flowable-errorDef-errorVariableLocalScope', component: ErrorDef_VariableLocalScopeEntry, isEdited: isCheckboxEntryEdited }
+            ];
+            want.forEach((w) => {
+              const exists = general.entries.some((e: any) => e && e.id === w.id);
+              if (!exists) {
+                general.entries.splice(Math.max(insertAfterIdx + offset, 0), 0, w);
+                offset += 1;
+              }
+            });
+          }
+          // ensure separator after adding
+          try { ensureGeneralSeparator(); } catch {}
+          // add Error mapping section right after General
+          const existsMap = groups.some((g: any) => g && g.id === 'flowable-error-mapping');
+          if (!existsMap) {
+            const mapGroup = createErrorMappingGroup(element);
+            const afterGen = (general ? groups.indexOf(general) : groups.findIndex((g: any) => g && g.id === 'general'));
+            const insertAt = afterGen >= 0 ? afterGen + 1 : groups.length;
+            groups.splice(insertAt, 0, mapGroup);
           }
         }
       }
@@ -1649,14 +1948,24 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
         groups.push(createExecutionGroup(element));
         try { console.debug && console.debug('[FlowableProvider] added Execution group'); } catch (e) {}
       }
-      // Remove default Message group for StartEvent / IntermediateCatchEvent / BoundaryEvent (we manage event via Flowable sections)
-      if (isStartEvent(element) || isIntermediateCatchEvent(element) || isBoundaryEvent(element)) {
+      // Remove default Message group for StartEvent / IntermediateCatchEvent / Message BoundaryEvent (we manage event via Flowable sections)
+      if (isStartEvent(element) || isIntermediateCatchEvent(element) || (isBoundaryEvent(element) && isMessageBoundaryEvent(element))) {
         const idx = groups.findIndex((g: any) => {
           const id = String(g && g.id || '').toLowerCase();
           const label = String(g && g.label || '').toLowerCase();
           return id === 'message' || id === 'messagegroup' || /\bmessage\b/.test(label);
         });
         if (idx >= 0) groups.splice(idx, 1);
+      }
+      // Remove default Error group for Error Boundary Events
+      if (isBoundaryEvent(element) && isErrorBoundaryEvent(element)) {
+        const idxErr = groups.findIndex((g: any) => {
+          const id = String(g && g.id || '').toLowerCase();
+          const label = String(g && g.label || '').toLowerCase();
+          // match the built-in Error group only (not our flowable-error-variables)
+          return (id === 'error' || id === 'errorgroup' || label === 'error');
+        });
+        if (idxErr >= 0) groups.splice(idxErr, 1);
       }
       return groups;
     };

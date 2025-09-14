@@ -101,12 +101,16 @@ function initModeler() {
               }
             }
           }
-          // Defaults for new BoundaryEvent: correlation parameter
+          // Defaults for new BoundaryEvent: correlation parameter (skip for timer/error)
           if (bo && bo.$type === 'bpmn:BoundaryEvent') {
             const bpmnFactory = modeler.get('bpmnFactory');
             const modeling = modeler.get('modeling');
             const eventBus = modeler.get('eventBus');
             if (bpmnFactory && modeling) {
+              const defs = Array.isArray((bo as any).eventDefinitions) ? (bo as any).eventDefinitions : [];
+              const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
+              const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
+              if (hasTimer || hasError) return;
               let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
               if (!ext) {
                 ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
@@ -442,7 +446,8 @@ async function openFile(file: File) {
       const raw = (e.target as FileReader).result as string;
       const pre = prefixVariableChildrenForImport(raw);
       const expanded = expandSubProcessShapesInDI(pre);
-      await modeler.importXML(expanded);
+      const normalizedErrors = normalizeErrorRefOnImport(expanded);
+      await modeler.importXML(normalizedErrors);
       sanitizeModel();
       modeler.get('canvas').zoom('fit-viewport', 'auto');
       setStatus(`Geladen: ${file.name}`);
@@ -482,7 +487,8 @@ async function saveXML() {
     const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
     const withoutMessageDefs = stripMessageEventDefinitionsInXML(withStartCfgCdata);
     const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
-    const withFlowableHeader = toFlowableDefinitionHeader(mappedSendTasks);
+    const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedSendTasks);
+    const withFlowableHeader = toFlowableDefinitionHeader(withErrorRefCodes);
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -549,6 +555,86 @@ function prefixVariableChildrenForImport(xml: string): string {
   }
 }
 
+// Normalize Flowable-style errorRef (holding errorCode) to proper BPMN references:
+// - If errorEventDefinition@errorRef references a non-existent ID but matches an existing <error errorCode="...">,
+//   replace it with that <error>'s id.
+// - If no matching <error> exists, create one under <definitions> and point errorRef to it.
+function normalizeErrorRefOnImport(xml: string): string {
+  try {
+    // Collect existing <error id=... errorCode=...>
+    const idToCode = new Map<string, string>();
+    const codeToId = new Map<string, string>();
+    const reError = /<([\w-]+:)?error\b([^>]*)>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = reError.exec(xml))) {
+      const attrs = m[2] || '';
+      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs);
+      const codeMatch = /\berrorCode\s*=\s*"([^"]*)"/i.exec(attrs);
+      if (idMatch) {
+        const id = idMatch[1];
+        const code = codeMatch ? codeMatch[1] : '';
+        idToCode.set(id, code);
+        if (code) codeToId.set(code, id);
+      }
+    }
+
+    // Track new errors to inject
+    const newErrors: Array<{ id: string, code: string, name: string } > = [];
+
+    // Replace errorRef in errorEventDefinition if needed
+    const reErrDefRef = /(<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*")([^"]+)(")/gi;
+    let changed = false;
+    const replaced = xml.replace(reErrDefRef, (full, pre, _ns, ref, post) => {
+      // already an existing error ID?
+      if (idToCode.has(ref)) return full;
+      // treat as code: find existing error by code or create one
+      let targetId = codeToId.get(ref);
+      if (!targetId) {
+        // generate new unique id
+        const base = 'Error_' + (ref || 'code').replace(/[^A-Za-z0-9_\-]/g, '_');
+        let candidate = base;
+        let i = 1;
+        while (idToCode.has(candidate)) { candidate = base + '_' + (++i); }
+        targetId = candidate;
+        idToCode.set(targetId, ref);
+        codeToId.set(ref, targetId);
+        newErrors.push({ id: targetId, code: ref, name: ref });
+      }
+      changed = true;
+      return `${pre}${targetId}${post}`;
+    });
+
+    if (!changed && !newErrors.length) return xml;
+
+    // Inject any newly created <error> elements before </definitions>
+    if (newErrors.length) {
+      // detect prefix used for definitions and error elements
+      const defMatch = /<([\w-]+:)?definitions\b[^>]*>/i.exec(replaced);
+      const ns = defMatch && defMatch[1] ? defMatch[1] : 'bpmn:';
+      const injection = newErrors.map(e => `  <${ns}error id="${e.id}" name="${escapeXml(e.name)}" errorCode="${escapeXml(e.code)}" />`).join('\n');
+      const reClose = /(<\/(?:[\w-]+:)?definitions>)/i;
+      if (reClose.test(replaced)) {
+        return replaced.replace(reClose, `${injection}\n$1`);
+      } else {
+        // fallback: append at end
+        return replaced + `\n${injection}\n`;
+      }
+    }
+    return replaced;
+  } catch {
+    return xml;
+  }
+}
+
+function escapeXml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 // Ensure flowable:eventType body is wrapped in CDATA
 function wrapEventTypeInCDATA(xml: string): string {
   try {
@@ -591,6 +677,34 @@ function wrapStartEventCorrelationConfigurationInCDATA(xml: string): string {
       const trimmed = String(inner).trim();
       if (!trimmed) return _m;
       return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Replace errorEventDefinition@errorRef with the actual errorCode of the referenced bpmn:Error, for Flowable compatibility
+function mapErrorRefToErrorCodeOnExport(xml: string): string {
+  try {
+    // Build map of Error element ID -> errorCode
+    const idToCode = new Map<string, string>();
+    const reError = /<([\w-]+:)?error\b([^>]*)>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = reError.exec(xml))) {
+      const attrs = m[2] || '';
+      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs);
+      const codeMatch = /\berrorCode\s*=\s*"([^"]*)"/i.exec(attrs);
+      if (idMatch && codeMatch) {
+        idToCode.set(idMatch[1], codeMatch[1]);
+      }
+    }
+    if (!idToCode.size) return xml;
+    // Replace errorRef values on errorEventDefinition with code if we have a match
+    const reErrDef = /(<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*")([^"]+)(")/gi;
+    return xml.replace(reErrDef, (full, pre, _ns, ref, post) => {
+      const code = idToCode.get(ref);
+      if (!code) return full;
+      return `${pre}${code}${post}`;
     });
   } catch {
     return xml;
@@ -963,6 +1077,10 @@ function ensureCorrelationParameterForBoundaryEvents() {
     all.forEach((el: any) => {
       const bo = el && el.businessObject;
       if (!bo || bo.$type !== 'bpmn:BoundaryEvent') return;
+      const defs = Array.isArray((bo as any).eventDefinitions) ? (bo as any).eventDefinitions : [];
+      const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
+      const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
+      if (hasTimer || hasError) return;
       let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
       if (!ext) {
         ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });

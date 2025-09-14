@@ -125,7 +125,9 @@ const flowableModdle: Record<string, any> = {
       properties: [
         { name: 'source', isAttr: true, type: 'String' },
         { name: 'sourceExpression', isAttr: true, type: 'String' },
-        { name: 'target', isAttr: true, type: 'String' }
+        { name: 'target', isAttr: true, type: 'String' },
+        // allow transient flag on inbound mappings for Error boundary mapping use-case
+        { name: 'transient', isAttr: true, type: 'Boolean' }
       ]
     },
     {
@@ -182,6 +184,28 @@ const flowableModdle: Record<string, any> = {
       properties: [
         { name: 'source', isAttr: true, type: 'String' },
         { name: 'target', isAttr: true, type: 'String' }
+      ]
+    },
+    {
+      name: 'ErrorBoundaryProps',
+      isAbstract: true,
+      extends: [ 'bpmn:BoundaryEvent' ],
+      properties: [
+        { name: 'errorVariableName', isAttr: true, type: 'String' },
+        { name: 'errorVariableTransient', isAttr: true, type: 'Boolean' },
+        { name: 'errorVariableLocalScope', isAttr: true, type: 'Boolean' }
+      ]
+    }
+    ,
+    {
+      name: 'ErrorEventDefinitionProps',
+      isAbstract: true,
+      // enable Flowable error variable attributes on the error event definition itself
+      extends: [ 'bpmn:ErrorEventDefinition' ],
+      properties: [
+        { name: 'errorVariableName', isAttr: true, type: 'String' },
+        { name: 'errorVariableTransient', isAttr: true, type: 'Boolean' },
+        { name: 'errorVariableLocalScope', isAttr: true, type: 'Boolean' }
       ]
     }
   ]

@@ -57,9 +57,9 @@ Quick anchors (open in IDE):
 - Defaults: newly created ReceiveTasks get a default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`).
 
 ### Intermediate Catch Event / Boundary Event (message-style)
-- Same three sections as ReceiveTask when NOT a Timer event.
+- Same three sections as ReceiveTask when NOT a Timer or Error Boundary event.
 - Default `Message` group is removed.
-- Defaults: newly created ICE/Boundary get default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`).
+- Defaults: newly created ICE/Boundary get default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`), except for Timer or Error Boundary events.
 
 ### Start Event (message-style only)
 - Shows the three sections only if Flowable message metadata exists (presence of `<flowable:eventType>` or `<flowable:eventCorrelationParameter>`) or a `bpmn:MessageEventDefinition` is present, and not a Timer Start.
