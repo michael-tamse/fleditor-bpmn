@@ -489,7 +489,8 @@ async function saveXML() {
     const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
     const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedSendTasks);
     const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
-    const withFlowableHeader = toFlowableDefinitionHeader(reconciledErrors);
+    const withExternalWorkerStencils = ensureExternalWorkerStencilsOnExport(reconciledErrors);
+    const withFlowableHeader = toFlowableDefinitionHeader(withExternalWorkerStencils);
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -767,6 +768,68 @@ function reconcileErrorDefinitionsOnExport(xml: string): string {
         out += `\n${payload}\n`;
       }
     }
+
+    return out;
+  } catch {
+    return xml;
+  }
+}
+
+// For ServiceTasks with flowable:type="external-worker", ensure design stencils are written
+// inside extensionElements as required by Flowable Design:
+//   <extensionElements>
+//     <design:stencilid><![CDATA[ExternalWorkerTask]]></design:stencilid>
+//     <design:stencilsuperid><![CDATA[Task]]></design:stencilsuperid>
+//   </extensionElements>
+function ensureExternalWorkerStencilsOnExport(xml: string): string {
+  try {
+    let out = xml;
+    // pretty-printed block with stable indentation
+    const OPEN_INDENT = '      ';
+    const INNER_INDENT = '        ';
+    const buildStencilBlock = (extPrefix: string) => (
+      `<${extPrefix}extensionElements>\n` +
+      `${INNER_INDENT}<design:stencilid><![CDATA[ExternalWorkerTask]]></design:stencilid>\n` +
+      `${INNER_INDENT}<design:stencilsuperid><![CDATA[Task]]></design:stencilsuperid>\n` +
+      `${OPEN_INDENT}</${extPrefix}extensionElements>`
+    );
+
+    // 1) Handle paired serviceTask with content
+    const pairRe = /<(([\w-]+:)?serviceTask)\b([^>]*\bflowable:type\s*=\s*"external-worker"[^>]*)>([\s\S]*?)<\/(?:[\w-]+:)?serviceTask>/gi;
+    out = out.replace(pairRe, (_m, qname, pfxMaybe, attrs, inner) => {
+      const pfx = (pfxMaybe || '');
+      // Find existing extensionElements (prefixed or not)
+      const extRe = /<([\w-]+:)?extensionElements\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?extensionElements>/i;
+      let newInner: string;
+      const extMatch = inner.match(extRe);
+      if (extMatch) {
+        const extPrefix = extMatch[1] || pfx;
+        const extContent = extMatch[2] || '';
+        // Remove existing design stencil tags and trim trailing/leading whitespace
+        const cleaned = extContent
+          .replace(/<design:(stencilid|stencilsuperid)\b[\s\S]*?<\/design:\1>\s*/gi, '')
+          .trim();
+        // Rebuild pretty block and append remaining extension content on new line if present
+        const base = buildStencilBlock(extPrefix);
+        const extBlock = cleaned ? `${base}\n${cleaned}` : base;
+        // Ensure we replace with a block that starts on its own line
+        newInner = inner.replace(extRe, extBlock);
+      } else {
+        const extPrefix = pfx;
+        const extBlock = buildStencilBlock(extPrefix);
+        // place extensionElements as the first child with proper newlines
+        newInner = `\n${OPEN_INDENT}${extBlock}${inner ? `\n${inner.trimStart()}` : ''}`;
+      }
+      return `<${pfx}serviceTask${attrs}>${newInner}</${pfx}serviceTask>`;
+    });
+
+    // 2) Handle self-closing serviceTask
+    const selfRe = /<(([\w-]+:)?serviceTask)\b([^>]*\bflowable:type\s*=\s*"external-worker"[^>]*)\/>/gi;
+    out = out.replace(selfRe, (_m, _qname, pfxMaybe, attrs) => {
+      const pfx = (pfxMaybe || '');
+      const extBlock = buildStencilBlock(pfx);
+      return `<${pfx}serviceTask${attrs}>\n${OPEN_INDENT}${extBlock}\n    </${pfx}serviceTask>`;
+    });
 
     return out;
   } catch {
