@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BPMN Host Demo (Sidecar)</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; margin:0; }
+      header { display:flex; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; position:sticky; top:0; z-index:10; }
+      header .spacer { flex:1; }
+      main { height: calc(100vh - 52px); }
+      iframe { width:100%; height:100%; border:0; display:block; }
+      small.muted { color:#64748b; }
+      .state { font-size:12px; color:#475569; }
+      button, label { font-size:14px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button id="btn-load-to-host">Datei in Host laden…</button>
+      <button id="btn-open-in-editor">In Editor öffnen</button>
+      <button id="btn-save-from-editor">Vom Editor speichern</button>
+      <span class="spacer"></span>
+      <label><input id="chk-menubar" type="checkbox" checked /> Menüleiste</label>
+      <label><input id="chk-props" type="checkbox" checked /> Eigenschaften</label>
+      <span class="spacer"></span>
+      <span class="state">Status: <span id="state">Handshake: ausstehend</span></span>
+      <input id="host-file" type="file" accept=".bpmn,.xml,.bpmn20.xml" hidden />
+    </header>
+    <main>
+      <!-- Editor läuft im iFrame; Sidecar nutzt postMessage -->
+      <iframe id="editor" src="/index.html" title="BPMN Editor"></iframe>
+    </main>
+    <script type="module" src="/hosts/browser/main.ts"></script>
+  </body>
+  </html>
+

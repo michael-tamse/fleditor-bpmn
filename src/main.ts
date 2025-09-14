@@ -9,12 +9,19 @@ import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js
 
 import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
+import { SidecarBridge } from './sidecar/bridge';
+import { createDomTransport } from './sidecar/transports/dom';
+import { createPostMessageTransport } from './sidecar/transports/postMessage';
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
 let modeler: any;
 let isImporting = false;
+let sidecar: SidecarBridge | null = null;
+let sidecarConnected = false;
+let menubarVisible = true;
+let propertyPanelVisible = true;
 
 function setStatus(msg?: string) {
   if (!statusEl) return;
@@ -41,6 +48,21 @@ function initModeler() {
       panelSvc.attachTo('#properties');
     }
   } catch (e) {}
+
+  // Notify host on changes (throttled) if sidecar is connected
+  try {
+    const eventBus = modeler.get('eventBus');
+    let t: any;
+    if (eventBus) {
+      eventBus.on('commandStack.changed', () => {
+        if (!sidecarConnected || !sidecar) return;
+        clearTimeout(t);
+        t = setTimeout(() => {
+          try { sidecar?.emitEvent('doc.changed', { dirty: true }); } catch {}
+        }, 250);
+      });
+    }
+  } catch {}
 
   // Persist defaults for CallActivity on creation, avoid during import
   try {
@@ -470,31 +492,7 @@ function triggerOpen() {
 
 async function saveXML() {
   try {
-    // Persist defaults before export and prune incomplete mappings
-    ensureCallActivityDefaults();
-    pruneInvalidCallActivityMappings();
-    ensureDmnDefaultsForDecisionTasks();
-    ensureSystemChannelForSendTasks();
-    ensureDefaultOutboundMappingForSendTasks();
-    ensureCorrelationParameterForReceiveTasks();
-    ensureCorrelationParameterForIntermediateCatchEvents();
-    ensureCorrelationParameterForBoundaryEvents();
-    ensureCorrelationParameterForStartEvents();
-    ensureStartEventCorrelationConfigurationForStartEvents();
-    const { xml } = await modeler.saveXML({ format: true });
-    const withCdata = wrapConditionExpressionsInCDATA(xml);
-    const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
-    const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
-    const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
-    const withFlowableStringCdata = wrapFlowableStringInCDATA(withStartCfgCdata);
-    const withDecisionRefCdata = wrapDecisionReferenceTypeInCDATA(withFlowableStringCdata);
-    const withoutMessageDefs = stripMessageEventDefinitionsInXML(withDecisionRefCdata);
-    const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
-    const mappedBusinessRule = mapBusinessRuleToServiceDmnOnExport(mappedSendTasks);
-    const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedBusinessRule);
-    const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
-    const withExternalWorkerStencils = ensureExternalWorkerStencilsOnExport(reconciledErrors);
-    const withFlowableHeader = toFlowableDefinitionHeader(withExternalWorkerStencils);
+    const withFlowableHeader = await prepareXmlForExport();
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -524,6 +522,118 @@ function download(filename: string, data: string, type: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Build Flowable-export XML (used by save + sidecar)
+async function prepareXmlForExport(): Promise<string> {
+  // Persist defaults before export and prune incomplete mappings
+  ensureCallActivityDefaults();
+  pruneInvalidCallActivityMappings();
+  ensureDmnDefaultsForDecisionTasks();
+  ensureSystemChannelForSendTasks();
+  ensureDefaultOutboundMappingForSendTasks();
+  ensureCorrelationParameterForReceiveTasks();
+  ensureCorrelationParameterForIntermediateCatchEvents();
+  ensureCorrelationParameterForBoundaryEvents();
+  ensureCorrelationParameterForStartEvents();
+  ensureStartEventCorrelationConfigurationForStartEvents();
+  const { xml } = await modeler.saveXML({ format: true });
+  const withCdata = wrapConditionExpressionsInCDATA(xml);
+  const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
+  const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
+  const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
+  const withFlowableStringCdata = wrapFlowableStringInCDATA(withStartCfgCdata);
+  const withDecisionRefCdata = wrapDecisionReferenceTypeInCDATA(withFlowableStringCdata);
+  const withoutMessageDefs = stripMessageEventDefinitionsInXML(withDecisionRefCdata);
+  const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
+  const mappedBusinessRule = mapBusinessRuleToServiceDmnOnExport(mappedSendTasks);
+  const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedBusinessRule);
+  const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
+  const withExternalWorkerStencils = ensureExternalWorkerStencilsOnExport(reconciledErrors);
+  return toFlowableDefinitionHeader(withExternalWorkerStencils);
+}
+
+// Sidecar UI helpers
+function setMenubarVisible(visible: boolean) {
+  menubarVisible = !!visible;
+  const header = document.querySelector<HTMLElement>('header.toolbar');
+  if (header) header.style.display = menubarVisible ? '' : 'none';
+}
+
+function setPropertyPanelVisible(visible: boolean) {
+  propertyPanelVisible = !!visible;
+  const prop = document.querySelector<HTMLElement>('#properties');
+  if (prop) prop.style.display = propertyPanelVisible ? '' : 'none';
+}
+
+async function openViaSidecarOrFile() {
+  if (sidecarConnected && sidecar) {
+    try {
+      const xml: string = await sidecar.request('doc.load');
+      if (typeof xml === 'string' && xml.trim()) {
+        const pre = prefixVariableChildrenForImport(xml);
+        const expanded = expandSubProcessShapesInDI(pre);
+        const normalizedErrors = normalizeErrorRefOnImport(expanded);
+        await modeler.importXML(normalizedErrors);
+        sanitizeModel();
+        modeler.get('canvas').zoom('fit-viewport', 'auto');
+        setStatus('Aus Host geladen');
+        return;
+      }
+    } catch (e) {
+      // fallback to local dialog
+    }
+  }
+  triggerOpen();
+}
+
+async function saveXMLWithSidecarFallback() {
+  if (sidecarConnected && sidecar) {
+    try {
+      const xml = await prepareXmlForExport();
+      await sidecar.request('doc.save', { xml });
+      setStatus('Über Host gespeichert');
+      try { sidecar?.emitEvent('doc.changed', { dirty: false }); } catch {}
+      return;
+    } catch (e) {
+      // fallback to download
+    }
+  }
+  await saveXML();
+}
+
+function initSidecar() {
+  try {
+    // Prefer postMessage in iframe, else DOM transport
+    const inIframe = window.parent && window.parent !== window;
+    const transport = inIframe ? createPostMessageTransport(window.parent) : createDomTransport();
+    sidecar = new SidecarBridge(transport, 'component');
+
+    // Handle inbound UI ops
+    sidecar.onRequest('ui.setPropertyPanel', async (p: any) => {
+      setPropertyPanelVisible(!!(p && p.visible));
+      // publish ui.state for host convenience
+      try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
+      return { ok: true };
+    });
+    sidecar.onRequest('ui.setMenubar', async (p: any) => {
+      setMenubarVisible(!!(p && p.visible));
+      try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
+      return { ok: true };
+    });
+
+    // Start handshake; if no host responds we continue silently
+    sidecar.handshake().then((caps) => {
+      sidecarConnected = !!caps;
+      if (sidecarConnected && sidecar) {
+        // publish initial state
+        try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
+      }
+    }).catch(() => { sidecarConnected = false; });
+  } catch (e) {
+    // ignore sidecar setup errors; editor remains standalone
+    sidecarConnected = false;
+  }
 }
 
 // Ensure all conditionExpression bodies are wrapped in CDATA
@@ -1596,8 +1706,8 @@ function setupDragAndDrop() {
 
 // Toolbar Events
 $('#btn-new')?.addEventListener('click', createNew);
-$('#btn-open')?.addEventListener('click', triggerOpen);
-$('#btn-save-xml')?.addEventListener('click', saveXML);
+$('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
+$('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
 $('#btn-save-svg')?.addEventListener('click', saveSVG);
 $('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
 $('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
@@ -1606,3 +1716,4 @@ $('#btn-fit')?.addEventListener('click', fitViewport);
 
 setupDragAndDrop();
 initModeler();
+initSidecar();
