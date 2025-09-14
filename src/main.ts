@@ -473,6 +473,7 @@ async function saveXML() {
     // Persist defaults before export and prune incomplete mappings
     ensureCallActivityDefaults();
     pruneInvalidCallActivityMappings();
+    ensureDmnDefaultsForDecisionTasks();
     ensureSystemChannelForSendTasks();
     ensureDefaultOutboundMappingForSendTasks();
     ensureCorrelationParameterForReceiveTasks();
@@ -485,9 +486,12 @@ async function saveXML() {
     const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
     const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
     const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
-    const withoutMessageDefs = stripMessageEventDefinitionsInXML(withStartCfgCdata);
+    const withFlowableStringCdata = wrapFlowableStringInCDATA(withStartCfgCdata);
+    const withDecisionRefCdata = wrapDecisionReferenceTypeInCDATA(withFlowableStringCdata);
+    const withoutMessageDefs = stripMessageEventDefinitionsInXML(withDecisionRefCdata);
     const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
-    const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedSendTasks);
+    const mappedBusinessRule = mapBusinessRuleToServiceDmnOnExport(mappedSendTasks);
+    const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedBusinessRule);
     const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
     const withExternalWorkerStencils = ensureExternalWorkerStencilsOnExport(reconciledErrors);
     const withFlowableHeader = toFlowableDefinitionHeader(withExternalWorkerStencils);
@@ -673,6 +677,38 @@ function wrapSendSynchronouslyInCDATA(xml: string): string {
 function wrapStartEventCorrelationConfigurationInCDATA(xml: string): string {
   try {
     const re = /(<flowable:startEventCorrelationConfiguration\b[^>]*>)([\s\S]*?)(<\/flowable:startEventCorrelationConfiguration>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      if (!trimmed) return _m;
+      return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure flowable:string body is wrapped in CDATA
+function wrapFlowableStringInCDATA(xml: string): string {
+  try {
+    const re = /(<flowable:string\b[^>]*>)([\s\S]*?)(<\/flowable:string>)/g;
+    return xml.replace(re, (_m, open, inner, close) => {
+      const already = /<!\[CDATA\[/.test(inner);
+      if (already) return _m;
+      const trimmed = String(inner).trim();
+      if (!trimmed) return _m;
+      return `${open}<![CDATA[${trimmed}]]>${close}`;
+    });
+  } catch {
+    return xml;
+  }
+}
+
+// Ensure flowable:decisionReferenceType body is wrapped in CDATA
+function wrapDecisionReferenceTypeInCDATA(xml: string): string {
+  try {
+    const re = /(<flowable:decisionReferenceType\b[^>]*>)([\s\S]*?)(<\/flowable:decisionReferenceType>)/g;
     return xml.replace(re, (_m, open, inner, close) => {
       const already = /<!\[CDATA\[/.test(inner);
       if (already) return _m;
@@ -908,6 +944,27 @@ function mapSendTaskToServiceOnExport(xml: string): string {
       out = out.replace(close, `</${prefix}serviceTask>`);
     };
     // Handle both prefixed and unprefixed forms
+    replaceTriplet('bpmn:');
+    replaceTriplet('');
+    return out;
+  } catch {
+    return xml;
+  }
+}
+
+// Convert bpmn:businessRuleTask to bpmn:serviceTask with flowable:type="dmn" in the serialized XML
+function mapBusinessRuleToServiceDmnOnExport(xml: string): string {
+  try {
+    let out = xml;
+    const ensureType = (attrs: string) => (/\bflowable:type\s*=/.test(attrs) ? attrs : `${attrs} flowable:type="dmn"`);
+    const replaceTriplet = (prefix: string) => {
+      const openSelf = new RegExp(`<${prefix}businessRuleTask\\b([^>]*?)\\/>`, 'g');
+      const open = new RegExp(`<${prefix}businessRuleTask\\b([^>]*?)>`, 'g');
+      const close = new RegExp(`</${prefix}businessRuleTask>`, 'g');
+      out = out.replace(openSelf, (_m, attrs) => `<${prefix}serviceTask${ensureType(attrs)} />`);
+      out = out.replace(open, (_m, attrs) => `<${prefix}serviceTask${ensureType(attrs)}>`);
+      out = out.replace(close, `</${prefix}serviceTask>`);
+    };
     replaceTriplet('bpmn:');
     replaceTriplet('');
     return out;
@@ -1268,6 +1325,76 @@ function ensureSystemChannelForSendTasks() {
   }
 }
 
+// Ensure DMN defaults exist on BusinessRuleTask or ServiceTask(flowable:type="dmn")
+function ensureDmnDefaultsForDecisionTasks() {
+  try {
+    const elementRegistry = modeler.get('elementRegistry');
+    const modeling = modeler.get('modeling');
+    const bpmnFactory = modeler.get('bpmnFactory');
+    if (!elementRegistry || !modeling || !bpmnFactory) return;
+    const all = (elementRegistry.getAll && elementRegistry.getAll())
+      || (elementRegistry._elements && Object.values(elementRegistry._elements).map((e: any) => e.element))
+      || elementRegistry.filter((el: any) => !!el);
+    const isDmnLike = (bo: any) => {
+      if (!bo) return false;
+      if (bo.$type === 'bpmn:BusinessRuleTask') return true;
+      if (bo.$type === 'bpmn:ServiceTask') {
+        const t = bo.get ? bo.get('flowable:type') : (bo as any)['flowable:type'];
+        return t === 'dmn';
+      }
+      return false;
+    };
+    const ensureExt = (el: any, bo: any) => {
+      let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+      if (!ext) {
+        ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+        try { modeling.updateModdleProperties(el, bo, { extensionElements: ext }); } catch {}
+      }
+      return ext;
+    };
+    const getValues = (ext: any) => (ext.get ? ext.get('values') : ext.values) || [];
+    const findField = (values: any[], name: string) => values.find((v: any) => v && v.$type && /flowable:field/i.test(v.$type) && ((v.get ? v.get('name') : v.name) === name));
+    const setField = (el: any, ext: any, values: any[], name: string, val: string) => {
+      let fld = findField(values, name);
+      if (!fld) {
+        fld = bpmnFactory.create('flowable:Field', { name });
+        values = values.concat([ fld ]);
+        try { modeling.updateModdleProperties(el, ext, { values }); } catch {}
+      }
+      let node = fld.get ? fld.get('string') : (fld as any).string;
+      if (!node) {
+        node = bpmnFactory.create('flowable:String', { value: val });
+        try { modeling.updateModdleProperties(el, fld, { string: node }); } catch {}
+      } else {
+        try { modeling.updateModdleProperties(el, node, { value: val }); } catch {}
+      }
+    };
+    const ensureDecisionRefType = (el: any, ext: any, values: any[]) => {
+      let node = values.find((v: any) => v && v.$type && /flowable:decisionReferenceType/i.test(v.$type));
+      if (!node) {
+        node = bpmnFactory.create('flowable:DecisionReferenceType', { value: 'decisionTable' });
+        values = values.concat([ node ]);
+        try { modeling.updateModdleProperties(el, ext, { values }); } catch {}
+      } else {
+        try { modeling.updateModdleProperties(el, node, { value: 'decisionTable' }); } catch {}
+      }
+    };
+    all.forEach((el: any) => {
+      const bo = el && el.businessObject;
+      if (!isDmnLike(bo)) return;
+      const ext = ensureExt(el, bo);
+      let values = getValues(ext);
+      setField(el, ext, values, 'fallbackToDefaultTenant', 'true');
+      values = getValues(ext);
+      setField(el, ext, values, 'sameDeployment', 'true');
+      values = getValues(ext);
+      ensureDecisionRefType(el, ext, values);
+    });
+  } catch (e) {
+    console.warn('ensureDmnDefaultsForDecisionTasks failed:', e);
+  }
+}
+
 function zoom(delta: number) {
   const canvas = modeler.get('canvas');
   const current = canvas.zoom();
@@ -1296,6 +1423,15 @@ function fitViewport() {
       });
     } catch (e) {
       console.warn('Send-event ServiceTask view mapping failed:', e);
+    }
+    // Map ServiceTask with flowable:type="dmn" -> BusinessRuleTask for display
+    try {
+      const serviceDmn = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ServiceTask' && (el.businessObject.get ? el.businessObject.get('flowable:type') === 'dmn' : (el.businessObject as any)['flowable:type'] === 'dmn'));
+      serviceDmn.forEach((el: any) => {
+        try { bpmnReplace.replaceElement(el, { type: 'bpmn:BusinessRuleTask' }); } catch {}
+      });
+    } catch (e) {
+      console.warn('DMN ServiceTask view mapping failed:', e);
     }
     const scriptTasks = elementRegistry.filter((el: any) => el?.businessObject?.$type === 'bpmn:ScriptTask');
       scriptTasks.forEach((el: any) => {

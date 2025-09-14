@@ -22,6 +22,30 @@ const flowableModdle: Record<string, any> = {
       ]
     },
     {
+      name: 'String',
+      // flowable:string with CDATA body
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [ { name: 'value', isBody: true, type: 'String' } ]
+    },
+    {
+      name: 'Field',
+      // flowable:field with name attr and nested <flowable:string>
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [
+        { name: 'name', isAttr: true, type: 'String' },
+        { name: 'string', type: 'flowable:String' }
+      ]
+    },
+    {
+      name: 'DecisionReferenceType',
+      // flowable:decisionReferenceType with CDATA body
+      isAbstract: false,
+      superClass: [ 'Element' ],
+      properties: [ { name: 'value', isBody: true, type: 'String' } ]
+    },
+    {
       name: 'StartEventCorrelationConfiguration',
       // flowable:startEventCorrelationConfiguration inside extensionElements (text body, prefer CDATA)
       isAbstract: false,

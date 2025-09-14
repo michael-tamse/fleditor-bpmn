@@ -54,6 +54,10 @@ function isStartEvent(element: BPMNElement): boolean {
   return /StartEvent$/.test(getType(element));
 }
 
+function isBusinessRuleTask(element: BPMNElement): boolean {
+  return /BusinessRuleTask$/.test(getType(element));
+}
+
 // Hilfsfunktion: Prüft, ob ein IntermediateCatchEvent eine TimerEventDefinition besitzt
 function isTimerIntermediateCatchEvent(element: BPMNElement): boolean {
   if (!isIntermediateCatchEvent(element)) return false;
@@ -818,6 +822,104 @@ function ErrorCodeEntry(props: { element: BPMNElement }) {
     modeling.updateModdleProperties(element, ed, { errorRef: target });
   };
   return TextFieldEntry({ id: 'bpmn-error-code', element, label: translate ? translate('Error code') : 'Error code', getValue, setValue, debounce });
+}
+
+// ---- BusinessRuleTask (DMN) Helpers ----
+function findFlowableFieldByName(bo: any, name: string) {
+  const ext = getExtensionElements(bo);
+  const values = (ext && (ext.get ? ext.get('values') : ext.values)) || [];
+  return values.find((v: any) => v && /flowable:(field)$/i.test(String(v.$type || '')) && ((v.get ? v.get('name') : v.name) === name));
+}
+
+function ensureFlowableField(element: any, bo: any, name: string, bpmnFactory: any, modeling: any) {
+  let fld = findFlowableFieldByName(bo, name);
+  if (fld) return fld;
+  const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+  const values = (ext.get ? ext.get('values') : ext.values) || [];
+  fld = bpmnFactory.create('flowable:Field', { name });
+  modeling.updateModdleProperties(element, ext, { values: values.concat([ fld ]) });
+  return fld;
+}
+
+function getFieldStringValue(fld: any): string {
+  if (!fld) return '';
+  const node = fld.get ? fld.get('string') : fld.string;
+  if (!node) return '';
+  const v = node.get ? (node.get('value') ?? node.get('text')) : (node.value ?? node.text);
+  return v || '';
+}
+
+function setFieldStringValue(element: any, fld: any, value: string, bpmnFactory: any, modeling: any) {
+  if (!fld) return;
+  let node = fld.get ? fld.get('string') : fld.string;
+  if (!value) {
+    if (node) modeling.updateModdleProperties(element, fld, { string: undefined });
+    return;
+  }
+  if (!node) node = bpmnFactory.create('flowable:String', { value });
+  modeling.updateModdleProperties(element, fld, { string: node });
+  modeling.updateModdleProperties(element, node, { value });
+}
+
+function ensureBusinessRuleDefaults(element: any) {
+  try {
+    const bpmnFactory = useService('bpmnFactory');
+    const modeling = useService('modeling');
+    const el = element;
+    const bo = el && el.businessObject;
+    if (!bpmnFactory || !modeling || !bo) return;
+    const fld1 = ensureFlowableField(el, bo, 'fallbackToDefaultTenant', bpmnFactory, modeling);
+    setFieldStringValue(el, fld1, 'true', bpmnFactory, modeling);
+    const fld2 = ensureFlowableField(el, bo, 'sameDeployment', bpmnFactory, modeling);
+    setFieldStringValue(el, fld2, 'true', bpmnFactory, modeling);
+    const ext = ensureExtensionElements(el, bo, bpmnFactory, modeling);
+    const values = (ext.get ? ext.get('values') : ext.values) || [];
+    let node = values.find((v: any) => v && /flowable:(decisionReferenceType)$/i.test(String(v.$type || '')));
+    if (!node) {
+      node = bpmnFactory.create('flowable:DecisionReferenceType', { value: 'decisionTable' });
+      modeling.updateModdleProperties(el, ext, { values: values.concat([ node ]) });
+    } else {
+      modeling.updateModdleProperties(el, node, { value: 'decisionTable' });
+    }
+  } catch {}
+}
+
+function DecisionTableReferenceEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const el = props.element;
+  const bo = el.businessObject;
+  const getValue = () => {
+    const fld = findFlowableFieldByName(bo, 'decisionTableReferenceKey');
+    return getFieldStringValue(fld);
+  };
+  const setValue = (value: string) => {
+    const v = (value || '').trim();
+    const fld = ensureFlowableField(el, bo, 'decisionTableReferenceKey', bpmnFactory, modeling);
+    setFieldStringValue(el, fld, v, bpmnFactory, modeling);
+    ensureBusinessRuleDefaults(el);
+  };
+  return TextFieldEntry({ id: 'flowable-decisionTableReferenceKey', element: el, label: translate ? translate('Decision table reference') : 'Decision table reference', getValue, setValue, debounce });
+}
+
+function DecisionThrowOnNoHitsEntry(props: { element: BPMNElement }) {
+  const modeling = useService('modeling');
+  const bpmnFactory = useService('bpmnFactory');
+  const translate = useService('translate');
+  const el = props.element;
+  const bo = el.businessObject;
+  const getValue = () => {
+    const fld = findFlowableFieldByName(bo, 'decisionTaskThrowErrorOnNoHits');
+    return String(getFieldStringValue(fld)).trim().toLowerCase() === 'true';
+  };
+  const setValue = (checked: boolean) => {
+    const fld = ensureFlowableField(el, bo, 'decisionTaskThrowErrorOnNoHits', bpmnFactory, modeling);
+    setFieldStringValue(el, fld, checked ? 'true' : 'false', bpmnFactory, modeling);
+    ensureBusinessRuleDefaults(el);
+  };
+  return CheckboxEntry({ id: 'flowable-decisionTaskThrowErrorOnNoHits', element: el, label: translate ? translate('Throw error if no rules were hit') : 'Throw error if no rules were hit', getValue, setValue });
 }
 
 // --- Error mapping group (flowable:in list on BoundaryEvent) ---
@@ -1604,6 +1706,28 @@ function FlowablePropertiesProvider(this: any, propertiesPanel: any) {
             if (insertAfterIdx >= 0) general.entries.splice(insertAfterIdx + 1, 0, def); else general.entries.unshift(def);
           }
         }
+      }
+      // BusinessRuleTask (Flowable DMN) customizations
+      if (isBusinessRuleTask(element)) {
+        const general = groups && groups.find((g) => g && g.id === 'general');
+        if (general && Array.isArray(general.entries)) {
+          let insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'id');
+          if (insertAfterIdx < 0) insertAfterIdx = general.entries.findIndex((e: any) => e && e.id === 'name');
+          let offset = 1;
+          const want: any[] = [
+            { id: 'flowable-decisionTableReferenceKey', component: DecisionTableReferenceEntry, isEdited: isTextFieldEntryEdited },
+            { id: 'flowable-decisionTaskThrowErrorOnNoHits', component: DecisionThrowOnNoHitsEntry, isEdited: isCheckboxEntryEdited }
+          ];
+          want.forEach((def) => {
+            const exists = general.entries.some((e: any) => e && e.id === def.id);
+            if (!exists) {
+              const idx = insertAfterIdx >= 0 ? (insertAfterIdx + offset) : 0;
+              general.entries.splice(idx, 0, def);
+              offset += 1;
+            }
+          });
+        }
+        // do not mutate model here; defaults are handled in entry setters and before export
       }
       // SendTask customizations
       if (isSendTask(element)) {
