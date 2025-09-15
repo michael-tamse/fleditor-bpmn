@@ -12,13 +12,14 @@ This document guides agents (and contributors) working on this BPMN editor. It c
 - Build: Vite (Node 18+ recommended)
 - Language: TypeScript (ES modules)
  - Sidecar: Lightweight protocol + transports (DOM/postMessage) for embedding in Angular/Tauri/Browser hosts
+ - Tauri: Minimal host harness (no UI) that speaks the Sidecar protocol via DOM and performs file I/O/dialog
 
 ## Run & Build
 - Dev: `npm run dev`
 - Host Demo (Browser): `npm run dev:host` → opens `/hosts/browser/`
 - Build: `npm run build`
 - Preview: `npm run preview`
-- Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI)
+ - Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI). Dev server must bind `5173`.
 - Tauri Build: `npm run build:tauri`
 
 Note: Large bundle warnings are expected; not a blocker.
@@ -29,7 +30,7 @@ Note: Large bundle warnings are expected; not a blocker.
 - `src/flowable-properties-provider.ts`: Custom properties provider logic. Adds/adjusts entries and groups and integrates with the default provider.
 - `styles.css`, `index.html`: Base UI shell.
  - Sidecar (component ↔ host interface):
-   - `src/sidecar/shared/protocol.ts`: PROTOCOL_ID/Version, message types (handshake, req/res, events, error), capabilities.
+ - `src/sidecar/shared/protocol.ts`: PROTOCOL_ID/Version, message types (handshake, req/res, events, error), capabilities, operation names.
    - `src/sidecar/transports/dom.ts`: DOM CustomEvent transport (Angular/same-window).
    - `src/sidecar/transports/postMessage.ts`: postMessage transport (iframe/parent).
    - `src/sidecar/transports/memory.ts`: Memory transport (tests).
@@ -37,6 +38,8 @@ Note: Large bundle warnings are expected; not a blocker.
  - Browser Host Demo:
    - `hosts/browser/index.html`: Host UI (buttons, toggles) + iframe embedding the editor.
    - `hosts/browser/main.ts`: Host logic (handshake ack, ui ops, doc.load/save via downloads).
+ - Tauri Host Harness (no UI):
+   - `hosts/tauri/main.ts`: Implements a Sidecar host inside the Tauri WebView. Handles `doc.load`, `doc.save`, `doc.saveSvg` using `@tauri-apps/api` dialog/fs. Responds to `handshake:init` and advertises capabilities.
 
 Quick anchors (open in IDE):
 - `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
@@ -45,16 +48,17 @@ Quick anchors (open in IDE):
 ## Sidecar Integration
 - Overview: The editor runs standalone, but can integrate with an external host (Angular, Tauri, Browser) via a versioned, bidirectional interface.
 - Protocol: `bpmn-sidecar` with `handshake:init/ack`, `req/res`, `event`, `error`. Capabilities declare available host features and operations.
-- Supported ops (initial):
+- Supported ops:
   - `doc.load` (Comp → Host): host returns BPMN XML string.
-  - `doc.save` (Comp → Host): host persists XML (demo triggers browser download).
+  - `doc.save` (Comp → Host): host persists XML.
+  - `doc.saveSvg` (Comp → Host): host persists SVG.
   - `ui.setPropertyPanel` (Host → Comp): show/hide property panel.
   - `ui.setMenubar` (Host → Comp): show/hide editor menubar.
 - Events (Comp → Host): `ui.state` (menubar/propertyPanel flags), `doc.changed` (dirty hint).
 - Transports: DOM CustomEvents (same window), postMessage (iframe). Component auto-detects iframe and prefers postMessage.
 - Component wiring (in `src/main.ts`):
-  - Init at startup; handshake attempts are non-blocking (editor works without host).
-  - Open/Save buttons use host ops if connected, else fall back to file dialog/download.
+  - Startup performs a handshake with short retries to avoid races; editor remains functional without a host.
+  - Open/Save/SVG use host-first (`doc.load`/`doc.save`/`doc.saveSvg`) if connected; otherwise fall back to local file dialog/download.
   - UI requests update DOM and emit `ui.state` back to host.
 
 ### Run the Browser Host Demo
@@ -65,6 +69,7 @@ Quick anchors (open in IDE):
   - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
   - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
   - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `diagram-from-editor.bpmn` herunter.
+  - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `diagram-from-editor.svg` herunter.
 
 ### Host Security
 - For postMessage hosts, add origin checks on the host side. The demo uses `'*'` for simplicity in dev.
@@ -72,6 +77,18 @@ Quick anchors (open in IDE):
 ### Adding New Ops
 - Extend `OperationName` union in `src/sidecar/shared/protocol.ts` or use string ops for forward-compat.
 - Register handlers via `bridge.onRequest(op, handler)` in the host and call via `bridge.request(op, payload)` from the component (and vice versa if needed).
+ - Existing ops include: `doc.load`, `doc.save`, `doc.saveSvg`, `ui.setPropertyPanel`, `ui.setMenubar`.
+
+### Tauri Host Behavior
+- Dev window loads the editor directly (`index.html`); no separate host UI.
+- Host harness (`hosts/tauri/main.ts`) acknowledges `handshake:init` and advertises storage/ui features.
+- File dialogs and persistence use `@tauri-apps/api` (`dialog.open/save`, `fs.readTextFile/writeTextFile`).
+- Icons: requires `src-tauri/icons/icon.png` to exist (a placeholder is present).
+
+### Debug Logging
+- Enable console logs via `?debug=1` or `localStorage.setItem('fleditor:debug','1')`.
+- Editor logs (`[fleditor]`): handshake attempts/connected, host requests/responses for open/save/svg, and fallback usage.
+- Tauri host logs (`[tauri-host]`): handshake ack, `doc.load`/`doc.save`/`doc.saveSvg` requests and outcomes.
 
 ## Properties Panel Customizations
 - General group: adds a visual separator after `ID` if extra fields are present.
@@ -168,6 +185,55 @@ In `src/main.ts` we prune unsupported elements from palette, context pad, replac
 - Spacers: Use a dedicated component (thin top border, small spacing) to visually separate logical sections within a group.
  - Hooks: do not call `useService(...)` inside `getGroups` except within entry components. Mutations that need services should occur inside entry setters or in export helpers.
 
+### Component Agnosticism
+- Host-agnostic editor: avoid environment checks like `isTauri`/`isAngular` in the component. Do not call host APIs directly from `src/main.ts`.
+- Use Sidecar ops: route host interactions via Sidecar (`doc.load`, `doc.save`, `doc.saveSvg`, `ui.*`). If new capabilities are needed, add an operation instead of branching on environment.
+- Host-specific code lives in host harnesses (e.g., `hosts/tauri/main.ts` using `@tauri-apps/api`, browser demo using downloads).
+- Host-first behavior: after a successful handshake use host ops; otherwise fall back to local file dialog/download. Avoid double dialogs by not mixing host + fallback in the same action after handshake.
+- Debug toggle: enable logs with `?debug=1` or `localStorage.setItem('fleditor:debug','1')`. Editor logs use `[fleditor]`, host logs use a host-specific prefix (e.g., `[tauri-host]`).
+
+#### Do / Don’t Examples
+
+- Don’t: Call Tauri APIs directly from the component.
+  ```ts
+  // src/main.ts (anti-pattern)
+  if ((window as any).__TAURI__) {
+    const { save } = await import('@tauri-apps/api/dialog');
+    const { writeTextFile } = await import('@tauri-apps/api/fs');
+    const path = await save({ defaultPath: 'diagram.bpmn' });
+    if (path) await writeTextFile(path, xml);
+  }
+  ```
+
+- Do: Route persistence via Sidecar in the component.
+  ```ts
+  // src/main.ts
+  const res: any = await sidecar.request('doc.save', { xml }, 120000);
+  if (res?.ok) {
+    setStatus('Über Host gespeichert');
+  } else if (res?.canceled) {
+    setStatus('Speichern abgebrochen');
+  } else {
+    // fallback: browser download
+    download('diagram.bpmn', xml, 'application/xml');
+  }
+  ```
+
+- Do: Implement host-specific behavior inside the host harness.
+  ```ts
+  // hosts/tauri/main.ts
+  host.onRequest('doc.save', async ({ xml }) => {
+    const [{ save }, { writeTextFile }] = await Promise.all([
+      import('@tauri-apps/api/dialog'),
+      import('@tauri-apps/api/fs')
+    ]);
+    const path = await save({ defaultPath: 'diagram.bpmn', filters: [{ name: 'BPMN', extensions: ['bpmn','xml'] }] });
+    if (!path) return { ok: false, canceled: true };
+    await writeTextFile(path as string, xml);
+    return { ok: true, path };
+  });
+  ```
+
 ## Agent Operating Procedure
 - Planning: For multi-step tasks, use the Codex plan tool and keep steps concise.
 - Preambles: Before running groups of shell commands, post a short (1–2 sentence) note.
@@ -209,6 +275,8 @@ In `src/main.ts` we prune unsupported elements from palette, context pad, replac
 - Entry not shown: verify `getGroups` conditions, group ID match (`general`, `multiInstance`), and that `entries` array is updated in-place.
 - Message icon not shown: we inject `bpmn:MessageEventDefinition` for Start/ICE/Boundary at import if Flowable event metadata exists; we remove it only from the exported XML, not from the in-memory model.
 - SubProcess appears collapsed: import expands all matching `bpmndi:BPMNShape` with `isExpanded="true"`.
+- Double file dialogs: ensure host handshake succeeds before invoking Open. The editor now prefers host-only after handshake; otherwise uses only the local file dialog (no dual prompts).
+- Tauri dev port busy (5173): stop other Vite instances or change port; dev uses `--strictPort`.
 
 ---
 This guide is intentionally concise. When in doubt, prefer small, targeted changes and verify with a build. If a task requires broader edits, propose a plan first.
