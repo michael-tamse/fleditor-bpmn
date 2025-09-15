@@ -42,7 +42,10 @@
       <span id="status" class="status" role="status" aria-live="polite"></span>
     </footer>
 
+    <!-- Tauri host harness (no UI; only in Tauri env) -->
+    <script type="module" src="/hosts/tauri/main.ts"></script>
+
     <!-- App entry (bundled via Vite) -->
     <script type="module" src="/src/main.ts"></script>
   </body>
-  </html>
+</html>

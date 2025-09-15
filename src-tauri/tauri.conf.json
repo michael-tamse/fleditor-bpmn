@@ -5,9 +5,9 @@
     "version": "0.0.0"
   },
   "build": {
-    "beforeDevCommand": "vite",
+    "beforeDevCommand": "vite --strictPort --port 5173",
     "beforeBuildCommand": "vite build",
-    "devPath": "http://localhost:5173/hosts/browser/",
+    "devPath": "http://localhost:5173/index.html",
     "distDir": "../dist"
   },
   "tauri": {
@@ -29,4 +29,3 @@
     }
   }
 }
-

@@ -7,6 +7,7 @@ export const PROTOCOL_VERSION = '1.0.0' as const;
 export type OperationName =
   | 'doc.load'
   | 'doc.save'
+  | 'doc.saveSvg'
   | 'ui.setPropertyPanel'
   | 'ui.setMenubar';
 
@@ -85,4 +86,3 @@ export type AnyMsg =
 export function isAnyMsg(x: any): x is AnyMsg {
   return !!x && x.protocol === PROTOCOL_ID && typeof x.kind === 'string' && typeof x.id === 'string';
 }
-

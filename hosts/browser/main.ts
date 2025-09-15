@@ -48,6 +48,7 @@ window.addEventListener('message', (e: MessageEvent<any>) => {
         operations: [
           { name: 'doc.load' },
           { name: 'doc.save' },
+          { name: 'doc.saveSvg' },
           { name: 'ui.setPropertyPanel' },
           { name: 'ui.setMenubar' }
         ]
@@ -74,6 +75,12 @@ function setupBridge() {
   bridge.onRequest('doc.save', async (p: any) => {
     const xml = String(p?.xml || '');
     if (xml) download('diagram-from-editor.bpmn', xml, 'application/xml');
+    return { ok: true };
+  });
+
+  bridge.onRequest('doc.saveSvg', async (p: any) => {
+    const svg = String(p?.svg || '');
+    if (svg) download('diagram-from-editor.svg', svg, 'image/svg+xml');
     return { ok: true };
   });
 
@@ -129,4 +136,3 @@ chkProps.addEventListener('change', async () => {
 // Initialize after iframe has a contentWindow
 if (iframe.contentWindow) setupBridge();
 else iframe.addEventListener('load', setupBridge, { once: true });
-

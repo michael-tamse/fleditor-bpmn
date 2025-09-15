@@ -31,3 +31,8 @@ declare module 'bpmn-moddle' {
   const _default: any;
   export default _default;
 }
+
+// Tauri global (used without installing @tauri-apps/api)
+declare global {
+  interface Window { __TAURI__?: any }
+}

@@ -22,3 +22,27 @@ pnpm-debug.log*
 # Env files (if ever added)
 .env
 .env.*
+
+# Rust (Tauri) build artifacts
+src-tauri/target/
+
+# Crash dumps and debug symbols
+*.crash
+*.mdmp
+*.ips
+*.diag
+*.dSYM/
+*.pdb
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Lockfiles for other package managers (we use npm)
+yarn.lock
+pnpm-lock.yaml
+
+# Misc temp files
+*.tmp
+*.temp
+tmp/
+nohup.out

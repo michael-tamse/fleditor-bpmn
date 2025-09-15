@@ -20,8 +20,27 @@ let modeler: any;
 let isImporting = false;
 let sidecar: SidecarBridge | null = null;
 let sidecarConnected = false;
+
+function hostAvailable() {
+  try { return !!(sidecar && (sidecar as any).capabilities); } catch { return false; }
+}
 let menubarVisible = true;
 let propertyPanelVisible = true;
+
+// Debug logging (enable with ?debug=1 or localStorage.setItem('fleditor:debug','1'))
+const DEBUG_ENABLED = (() => {
+  try {
+    const p = new URL(window.location.href).searchParams.get('debug');
+    if (p === '1') return true;
+    return localStorage.getItem('fleditor:debug') === '1';
+  } catch {
+    return false;
+  }
+})();
+function debug(...args: any[]) {
+  if (!DEBUG_ENABLED) return;
+  try { console.debug('[fleditor]', ...args); } catch {}
+}
 
 function setStatus(msg?: string) {
   if (!statusEl) return;
@@ -55,10 +74,10 @@ function initModeler() {
     let t: any;
     if (eventBus) {
       eventBus.on('commandStack.changed', () => {
-        if (!sidecarConnected || !sidecar) return;
+        if (!hostAvailable()) return;
         clearTimeout(t);
         t = setTimeout(() => {
-          try { sidecar?.emitEvent('doc.changed', { dirty: true }); } catch {}
+          try { sidecar?.emitEvent('doc.changed', { dirty: true }); debug('event: doc.changed -> host'); } catch {}
         }, 250);
       });
     }
@@ -493,6 +512,8 @@ function triggerOpen() {
 async function saveXML() {
   try {
     const withFlowableHeader = await prepareXmlForExport();
+    // Browser default: trigger download (or use host via saveXMLWithSidecarFallback)
+    debug('save: browser download fallback');
     download('diagram.bpmn', withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
@@ -504,12 +525,39 @@ async function saveXML() {
 async function saveSVG() {
   try {
     const { svg } = await modeler.saveSVG();
+    debug('save-svg: browser download fallback');
     download('diagram.svg', svg, 'image/svg+xml');
     setStatus('SVG exportiert');
   } catch (err) {
     console.error(err);
     alert('Fehler beim Export als SVG');
   }
+}
+
+async function saveSVGWithSidecarFallback() {
+  try {
+    const { svg } = await modeler.saveSVG();
+    if (hostAvailable() && sidecar) {
+      debug('save-svg: request host doc.saveSvg', { size: svg.length });
+      const res: any = await sidecar.request('doc.saveSvg', { svg }, 120000);
+      if (res && res.ok) {
+        debug('save-svg: host ok', { path: (res && res.path) || undefined });
+        setStatus('Über Host gespeichert');
+        return;
+      }
+      if (res && res.canceled) {
+        debug('save-svg: host canceled');
+        setStatus('Speichern abgebrochen');
+        return;
+      }
+      debug('save-svg: host returned not ok', res);
+      setStatus('Speichern fehlgeschlagen' + ((res && res.error) ? (': ' + String(res.error)) : ''));
+      return;
+    }
+  } catch (e) {
+    debug('save-svg: host error/no host; fallback', e);
+  }
+  await saveSVG();
 }
 
 function download(filename: string, data: string, type: string) {
@@ -567,10 +615,13 @@ function setPropertyPanelVisible(visible: boolean) {
 }
 
 async function openViaSidecarOrFile() {
-  if (sidecarConnected && sidecar) {
+  // Prefer host only after handshake; do not double-open
+  if (hostAvailable() && sidecar) {
+    debug('open: request host doc.load');
     try {
-      const xml: string = await sidecar.request('doc.load');
+      const xml: string = await sidecar.request('doc.load', undefined, 120000);
       if (typeof xml === 'string' && xml.trim()) {
+        debug('open: host response', { length: xml.length });
         const pre = prefixVariableChildrenForImport(xml);
         const expanded = expandSubProcessShapesInDI(pre);
         const normalizedErrors = normalizeErrorRefOnImport(expanded);
@@ -579,25 +630,45 @@ async function openViaSidecarOrFile() {
         modeler.get('canvas').zoom('fit-viewport', 'auto');
         setStatus('Aus Host geladen');
         return;
+      } else {
+        debug('open: host canceled or empty response');
+        setStatus('Öffnen abgebrochen');
+        return;
       }
     } catch (e) {
-      // fallback to local dialog
+      debug('open: host error after handshake, no fallback', e);
+      setStatus('Öffnen fehlgeschlagen');
+      return;
     }
   }
+  // No host: fallback to local file dialog
+  debug('open: fallback file dialog');
   triggerOpen();
 }
 
 async function saveXMLWithSidecarFallback() {
-  if (sidecarConnected && sidecar) {
-    try {
-      const xml = await prepareXmlForExport();
-      await sidecar.request('doc.save', { xml });
-      setStatus('Über Host gespeichert');
-      try { sidecar?.emitEvent('doc.changed', { dirty: false }); } catch {}
+  try {
+    const xml = await prepareXmlForExport();
+    if (hostAvailable() && sidecar) {
+      debug('save: request host doc.save', { size: xml.length });
+      const res: any = await sidecar.request('doc.save', { xml }, 120000);
+      if (res && res.ok) {
+        debug('save: host ok', { path: (res && res.path) || undefined });
+        setStatus('Über Host gespeichert');
+        try { sidecar?.emitEvent('doc.changed', { dirty: false }); debug('event: doc.changed=false -> host'); } catch {}
+        return;
+      }
+      if (res && res.canceled) {
+        debug('save: host canceled');
+        setStatus('Speichern abgebrochen');
+        return;
+      }
+      debug('save: host returned not ok', res);
+      setStatus('Speichern fehlgeschlagen' + ((res && res.error) ? (': ' + String(res.error)) : ''));
       return;
-    } catch (e) {
-      // fallback to download
     }
+  } catch (e) {
+    debug('save: host error/no host; fallback', e);
   }
   await saveXML();
 }
@@ -622,14 +693,28 @@ function initSidecar() {
       return { ok: true };
     });
 
-    // Start handshake; if no host responds we continue silently
-    sidecar.handshake().then((caps) => {
-      sidecarConnected = !!caps;
-      if (sidecarConnected && sidecar) {
-        // publish initial state
-        try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
-      }
-    }).catch(() => { sidecarConnected = false; });
+    // Start handshake; if no host responds, keep retrying briefly to avoid race
+    let handshakeAttempts = 0;
+    const tryHandshake = () => {
+      if (hostAvailable()) return;
+      handshakeAttempts++;
+      debug('handshake: attempt', handshakeAttempts);
+      sidecar!.handshake(2000).then((caps) => {
+        sidecarConnected = !!caps;
+        if (hostAvailable()) {
+          debug('handshake: connected', { host: (sidecar as any).capabilities?.host, features: (sidecar as any).capabilities?.features });
+          try { setStatus('Host verbunden'); } catch {}
+          // publish initial state
+          try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
+          return;
+        }
+        if (handshakeAttempts < 5) setTimeout(tryHandshake, 1000);
+      }).catch(() => {
+        sidecarConnected = false;
+        if (handshakeAttempts < 5) setTimeout(tryHandshake, 1000);
+      });
+    };
+    tryHandshake();
   } catch (e) {
     // ignore sidecar setup errors; editor remains standalone
     sidecarConnected = false;
@@ -1708,7 +1793,7 @@ function setupDragAndDrop() {
 $('#btn-new')?.addEventListener('click', createNew);
 $('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
 $('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
-$('#btn-save-svg')?.addEventListener('click', saveSVG);
+$('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
 $('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
 $('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
 $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
