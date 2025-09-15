@@ -11,6 +11,16 @@ function isTauri(): boolean {
   const transport = createDomTransport();
   const host = new SidecarBridge(transport, 'host');
 
+  function deriveProcessId(xml: string): string | null {
+    try {
+      const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*"([^"]+)"/i.exec(xml);
+      return m ? m[2] : null;
+    } catch { return null; }
+  }
+  function sanitizeFileName(name: string): string {
+    return name.replace(/[\\/:*?"<>|\n\r]+/g, '_');
+  }
+
   // Respond to handshake:init with capabilities
   const unlisten = transport.onMessage((msg) => {
     if (msg.protocol === PROTOCOL_ID && msg.kind === 'handshake:init') {
@@ -53,8 +63,10 @@ function isTauri(): boolean {
         import('@tauri-apps/api/dialog'),
         import('@tauri-apps/api/fs')
       ]);
+      const pid = deriveProcessId(xml);
+      const suggested = sanitizeFileName((pid || 'diagram') + '.bpmn20.xml');
       const filePath = await save({
-        defaultPath: 'diagram.bpmn',
+        defaultPath: suggested,
         filters: [ { name: 'BPMN', extensions: ['bpmn', 'xml'] } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.save canceled'); return { ok: false, canceled: true }; }

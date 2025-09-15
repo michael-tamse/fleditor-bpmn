@@ -30,6 +30,16 @@ function download(filename: string, data: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function deriveProcessId(xml: string): string | null {
+  try {
+    const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*"([^"]+)"/i.exec(xml);
+    return m ? m[2] : null;
+  } catch { return null; }
+}
+function sanitizeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|\n\r]+/g, '_');
+}
+
 // Quick handshake ACK on raw postMessage to avoid race
 window.addEventListener('message', (e: MessageEvent<any>) => {
   const msg: AnyMsg = e.data;
@@ -74,7 +84,11 @@ function setupBridge() {
 
   bridge.onRequest('doc.save', async (p: any) => {
     const xml = String(p?.xml || '');
-    if (xml) download('diagram-from-editor.bpmn', xml, 'application/xml');
+    if (xml) {
+      const pid = deriveProcessId(xml);
+      const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
+      download(name, xml, 'application/xml');
+    }
     return { ok: true };
   });
 

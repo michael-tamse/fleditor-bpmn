@@ -509,12 +509,25 @@ function triggerOpen() {
   (input as HTMLInputElement).click();
 }
 
+function deriveProcessId(xml: string): string | null {
+  try {
+    const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*\"([^\"]+)\"/i.exec(xml);
+    return m ? m[2] : null;
+  } catch { return null; }
+}
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[\\/:*?\"<>|\n\r]+/g, '_');
+}
+
 async function saveXML() {
   try {
     const withFlowableHeader = await prepareXmlForExport();
     // Browser default: trigger download (or use host via saveXMLWithSidecarFallback)
     debug('save: browser download fallback');
-    download('diagram.bpmn', withFlowableHeader, 'application/xml');
+    const pid = deriveProcessId(withFlowableHeader);
+    const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
+    download(name, withFlowableHeader, 'application/xml');
     setStatus('XML exportiert');
   } catch (err) {
     console.error(err);
