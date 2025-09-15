@@ -113,8 +113,9 @@ function isTauri(): boolean {
         import('@tauri-apps/api/dialog'),
         import('@tauri-apps/api/fs')
       ]);
+      const suggested = sanitizeFileName(String(payload?.suggestedName || 'diagram.svg'));
       const filePath = await save({
-        defaultPath: 'diagram.svg',
+        defaultPath: suggested,
         filters: [ { name: 'SVG', extensions: ['svg'] } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.saveSvg canceled'); return { ok: false, canceled: true }; }

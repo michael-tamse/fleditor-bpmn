@@ -538,8 +538,15 @@ async function saveXML() {
 async function saveSVG() {
   try {
     const { svg } = await modeler.saveSVG();
+    // compute suggested name based on current process id
+    let name = 'diagram.svg';
+    try {
+      const { xml } = await modeler.saveXML({ format: false });
+      const pid = deriveProcessId(xml);
+      name = sanitizeFileName(((pid || 'diagram') + '.svg'));
+    } catch {}
     debug('save-svg: browser download fallback');
-    download('diagram.svg', svg, 'image/svg+xml');
+    download(name, svg, 'image/svg+xml');
     setStatus('SVG exportiert');
   } catch (err) {
     console.error(err);
@@ -551,8 +558,15 @@ async function saveSVGWithSidecarFallback() {
   try {
     const { svg } = await modeler.saveSVG();
     if (hostAvailable() && sidecar) {
-      debug('save-svg: request host doc.saveSvg', { size: svg.length });
-      const res: any = await sidecar.request('doc.saveSvg', { svg }, 120000);
+      // compute suggested name based on current process id
+      let suggestedName = 'diagram.svg';
+      try {
+        const { xml } = await modeler.saveXML({ format: false });
+        const pid = deriveProcessId(xml);
+        suggestedName = sanitizeFileName(((pid || 'diagram') + '.svg'));
+      } catch {}
+      debug('save-svg: request host doc.saveSvg', { size: svg.length, suggestedName });
+      const res: any = await sidecar.request('doc.saveSvg', { svg, suggestedName }, 120000);
       if (res && res.ok) {
         debug('save-svg: host ok', { path: (res && res.path) || undefined });
         setStatus('Über Host gespeichert');

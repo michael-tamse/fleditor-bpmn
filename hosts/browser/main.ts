@@ -94,7 +94,8 @@ function setupBridge() {
 
   bridge.onRequest('doc.saveSvg', async (p: any) => {
     const svg = String(p?.svg || '');
-    if (svg) download('diagram-from-editor.svg', svg, 'image/svg+xml');
+    const suggested = String(p?.suggestedName || 'diagram-from-editor.svg');
+    if (svg) download(suggested, svg, 'image/svg+xml');
     return { ok: true };
   });
 

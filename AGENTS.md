@@ -43,7 +43,7 @@ Note: Large bundle warnings are expected; not a blocker.
 
 Quick anchors (open in IDE):
 - `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
-- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save` fallbacks.
+- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save`/`doc.saveSvg` fallbacks.
 
 ## Sidecar Integration
 - Overview: The editor runs standalone, but can integrate with an external host (Angular, Tauri, Browser) via a versioned, bidirectional interface.
@@ -68,8 +68,8 @@ Quick anchors (open in IDE):
   - The host iframe-loads `/index.html` (the editor) and sends `handshake:ack`.
   - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
   - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
-  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `diagram-from-editor.bpmn` herunter.
-  - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `diagram-from-editor.svg` herunter.
+  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` herunter (ersatzweise `diagram.bpmn20.xml`).
+  - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `<processId>.svg` herunter (ersatzweise `diagram.svg`).
 
 ### Host Security
 - For postMessage hosts, add origin checks on the host side. The demo uses `'*'` for simplicity in dev.
@@ -84,6 +84,11 @@ Quick anchors (open in IDE):
 - Host harness (`hosts/tauri/main.ts`) acknowledges `handshake:init` and advertises storage/ui features.
 - File dialogs and persistence use `@tauri-apps/api` (`dialog.open/save`, `fs.readTextFile/writeTextFile`).
 - Icons: requires `src-tauri/icons/icon.png` to exist (a placeholder is present).
+- Default file names:
+  - XML: `<processId>.bpmn20.xml` extracted from the BPMN `process@id`; falls back to `diagram.bpmn20.xml`.
+  - SVG: `<processId>.svg`; falls back to `diagram.svg`.
+  - Invalid filename characters are sanitized to `_`.
+  - Editor fallback (browser download) and browser host demo use the same naming scheme.
 
 ### Debug Logging
 - Enable console logs via `?debug=1` or `localStorage.setItem('fleditor:debug','1')`.
