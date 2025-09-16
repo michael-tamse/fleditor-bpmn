@@ -56,6 +56,7 @@ Quick anchors (open in IDE):
 - Files: `src/bpmn-tabs/tabs.ts`, `src/bpmn-tabs/tabs.css`, `index.html` (tabbar markup), optional demo `src/bpmn-tabs/tabs-usage-bpmn.ts`.
 - UX:
   - Add button in the tabbar creates a new diagram tab.
+  - No auto-tab on startup and after closing the last tab. An empty state is shown when no tabs are open; use the `＋` button or "Öffnen" to start.
   - Context menu per tab: Close, Close Others, Close All. Ctrl/Cmd+W closes the active tab; middle‑click closes a tab.
   - Overflow arrows appear when the tablist scrolls horizontally; keyboard nav uses Left/Right/Home/End and Enter/Space to activate.
   - Dirty indicator (●) on tab when unsaved changes exist (tracked via hashed XML baseline).
@@ -66,6 +67,37 @@ Quick anchors (open in IDE):
   - Active tab is persisted in `localStorage` (`fleditor:lastActiveTab`) with `{ title?, fileName? }` so the last active tab can be restored heuristically on reload.
   - Host open (`doc.load`) creates a new tab with the received XML; local file open creates a new tab too. Drag & drop onto a canvas imports into that specific tab.
   - Saving (host/browser) updates the tab’s baseline and clears dirty; suggested filenames derive from current `process@id` and are sanitized.
+
+### New Tab Defaults
+- The `＋` button creates a fresh diagram whose `process@id` is unique across open tabs, following `Process_1`, `Process_2`, ... numbering. Implementation:
+  - `computeNextProcessId()` scans open tabs and picks the next free number.
+  - `createInitialXmlWithProcessId(pid)` derives an initial XML with both the `bpmn:process@id` and the DI `bpmnElement` set to `pid`.
+  - The tab title initializes from that Process ID.
+
+### Empty State
+- When there are no tabs, an empty-state hint is rendered inside `.panels` (see `index.html` `#emptyState`).
+- Visibility toggled via `updateEmptyStateVisibility()` whenever tabs are created/destroyed.
+
+### Live Title Sync
+- The tab title updates live when the BPMN `process@id` changes.
+  - Hooked on `commandStack.changed`; reads the id via `deriveProcessIdFromModel()` and calls `updateStateTitle(...)`.
+
+### Duplicate-Open Handling
+- Opening BPMN XML (via host `doc.load` or local file) checks for an existing tab with the same Process ID:
+  - No existing tab → new tab is created.
+  - Existing and not dirty → the diagram is imported into that tab and the tab is activated.
+  - Existing and dirty → a confirm dialog asks whether to overwrite the changes; "Abbrechen" cancels the open.
+- Logic centralized in `openXmlConsideringDuplicates(xml, fileName?, source)`; tab lookup via `findTabByProcessId(pid)`.
+
+### Tauri‑Safe Confirm Dialogs
+- Avoid native `window.confirm` in Tauri (not allowlisted). Use the in-app confirm overlay instead:
+  - `showConfirmDialog(message, title?, options?)` renders an accessible modal (`Esc` cancels, `Enter` confirms) and returns a Promise<boolean>.
+  - Button labels can be customized; duplicate-open uses `okLabel: 'Ja'`.
+  - Styles live in `src/bpmn-tabs/tabs.css` under `.tab-confirm-overlay` / `.tab-confirm`.
+
+### Toolbar & Buttons
+- The dedicated "Neu" button was removed; creation happens via the `＋` in the tabbar.
+- The `＋` tabbar button is centered via flex styles for crisp alignment.
 
 ### Tabs Do / Don’t
 - Do: Create and destroy Modeler instances per tab; don’t share a singleton across tabs.

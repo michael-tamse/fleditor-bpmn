@@ -15,7 +15,6 @@
   <body>
     <header class="toolbar">
       <div class="toolbar__left">
-        <button id="btn-new" title="Neues Diagramm">Neu</button>
         <button id="btn-open" title="BPMN-Datei öffnen">Öffnen</button>
         <input id="file-input" type="file" accept=".bpmn,.xml,.bpmn20.xml" hidden />
         <span class="divider"></span>
@@ -39,7 +38,14 @@
           <button class="scroll-btn right" aria-hidden="true" tabindex="-1" title="Nach rechts scrollen">▶</button>
           <button class="add-tab" type="button" title="Neues Diagramm" aria-label="Neuen Tab anlegen">＋</button>
         </div>
-        <div class="panels"></div>
+        <div class="panels">
+          <div id="emptyState" class="empty-state" aria-live="polite">
+            <div class="hint">
+              <div class="title">Kein Diagramm geöffnet</div>
+              <div class="text">Mit ＋ neues Diagramm anlegen oder „Öffnen“ verwenden.</div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 

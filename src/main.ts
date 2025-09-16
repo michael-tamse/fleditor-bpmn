@@ -83,6 +83,76 @@ function setStatus(msg?: string) {
   statusEl.textContent = msg || '';
 }
 
+function updateEmptyStateVisibility() {
+  const el = document.querySelector<HTMLElement>('#emptyState');
+  if (!el) return;
+  const hasTabs = tabStates.size > 0;
+  el.classList.toggle('visible', !hasTabs);
+}
+
+// Lightweight in-app confirm dialog (avoids Tauri allowlist issues)
+function showConfirmDialog(
+  message: string,
+  title?: string,
+  options?: { okLabel?: string; cancelLabel?: string; okVariant?: 'danger' | 'primary' }
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const host = document.querySelector<HTMLElement>('#diagramTabs') || document.body;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'tab-confirm-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+
+    const modal = document.createElement('div');
+    modal.className = 'tab-confirm';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'title';
+    titleEl.textContent = title || 'Tab schließen?';
+
+    const textEl = document.createElement('div');
+    textEl.className = 'text';
+    textEl.textContent = message || '';
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const btnCancel = document.createElement('button');
+    btnCancel.type = 'button';
+    btnCancel.textContent = options?.cancelLabel || 'Abbrechen';
+
+    const btnOk = document.createElement('button');
+    btnOk.type = 'button';
+    btnOk.className = options?.okVariant === 'primary' ? '' : 'danger';
+    btnOk.textContent = options?.okLabel || 'Schließen';
+
+    actions.append(btnCancel, btnOk);
+    modal.append(titleEl, textEl, actions);
+    overlay.append(modal);
+    host.append(overlay);
+
+    const cleanup = (val: boolean) => {
+      try { document.removeEventListener('keydown', onKey); } catch {}
+      try { overlay.remove(); } catch {}
+      resolve(val);
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); cleanup(false); }
+      if (e.key === 'Enter') { e.preventDefault(); cleanup(true); }
+    };
+    document.addEventListener('keydown', onKey, { capture: true });
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+    btnCancel.addEventListener('click', () => cleanup(false));
+    btnOk.addEventListener('click', () => cleanup(true));
+
+    // Focus OK for quick keyboard confirm
+    setTimeout(() => btnOk.focus(), 0);
+  });
+}
+
 function getActiveState(): DiagramTabState | null {
   return activeTabState;
 }
@@ -184,11 +254,21 @@ function runWithState<T>(state: DiagramTabState, fn: () => T | Promise<T>): T | 
     const result = fn();
     if (result && typeof (result as any).then === 'function') {
       sync = false;
-      return (result as Promise<T>).finally(() => { modeler = prev; });
+      return (result as Promise<T>).finally(() => {
+        // Only restore if this state is not the currently active tab.
+        // This avoids clobbering the global modeler when activation happened meanwhile.
+        const active = getActiveState();
+        if (!active || active.id !== state.id) {
+          modeler = prev;
+        }
+      });
     }
     return result;
   } finally {
-    if (sync) modeler = prev;
+    if (sync) {
+      // Synchronous path: restore immediately
+      modeler = prev;
+    }
   }
 }
 
@@ -238,7 +318,14 @@ function scheduleDirtyCheck(state: DiagramTabState) {
 function bindModelerEvents(state: DiagramTabState) {
   const eventBus = state.modeler.get('eventBus');
   if (eventBus) {
-    eventBus.on('commandStack.changed', () => scheduleDirtyCheck(state));
+    eventBus.on('commandStack.changed', () => {
+      scheduleDirtyCheck(state);
+      // Update tab title live when the process id changes
+      try {
+        const pid = runWithState(state, () => deriveProcessIdFromModel());
+        if (pid) updateStateTitle(state, pid);
+      } catch {}
+    });
     eventBus.on('import.render.start', () => { state.isImporting = true; });
     eventBus.on('import.done', () => { state.isImporting = false; });
     eventBus.on('shape.added', (e: any) => {
@@ -490,6 +577,7 @@ function initTabs() {
 
       tabStates.set(id, state);
       setupModelerForState(state);
+      updateEmptyStateVisibility();
 
       const init = pendingTabInits.get(id) ?? {
         title: `Diagramm ${tabSequence}`,
@@ -509,7 +597,10 @@ function initTabs() {
       const state = tabStates.get(id);
       if (!state) return true;
       if (!state.dirty) return true;
-      return confirm('Es gibt ungespeicherte Änderungen. Tab trotzdem schließen?');
+      let pid: string | null = null;
+      try { pid = runWithState(state, () => deriveProcessIdFromModel()) as any; } catch {}
+      const titleMsg = `${pid ? `[${pid}] ` : ''}Tab schließen?`;
+      return await showConfirmDialog('Es gibt ungespeicherte Änderungen. Tab trotzdem schließen?', titleMsg);
     },
     onDestroyPanel(id) {
       pendingTabInits.delete(id);
@@ -522,13 +613,7 @@ function initTabs() {
         activeTabState = null;
         modeler = null;
       }
-      if (!tabStates.size) {
-        setTimeout(() => {
-          if (!tabStates.size) {
-            createNewDiagram();
-          }
-        }, 0);
-      }
+      updateEmptyStateVisibility();
     },
     onAddRequest() {
       createNewDiagram();
@@ -537,10 +622,11 @@ function initTabs() {
 }
 
 function createNewDiagram() {
-  const title = `Unbenannt ${untitledCounter++}`;
+  const nextPid = computeNextProcessId();
+  const xml = createInitialXmlWithProcessId(nextPid);
   createDiagramTab({
-    title,
-    xml: undefined,
+    title: nextPid,
+    xml,
     statusMessage: 'Neues Diagramm geladen'
   });
 }
@@ -798,14 +884,8 @@ async function openFileAsTab(file: File) {
   if (!file) return;
   try {
     const raw = await file.text();
-    const title = file.name || `Datei ${tabSequence}`;
-    const status = file.name ? `Geladen: ${file.name}` : 'Datei geladen';
-    createDiagramTab({
-      title,
-      xml: raw,
-      fileName: sanitizeFileName(file.name || 'diagram.bpmn20.xml'),
-      statusMessage: status
-    });
+    const fileName = sanitizeFileName(file.name || 'diagram.bpmn20.xml');
+    await openXmlConsideringDuplicates(raw, fileName, 'file');
   } catch (err) {
     console.error(err);
     alert('Fehler beim Import der Datei.');
@@ -850,6 +930,99 @@ function deriveProcessId(xml: string): string | null {
     const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*\"([^\"]+)\"/i.exec(xml);
     return m ? m[2] : null;
   } catch { return null; }
+}
+
+// Try to read the current Process id directly from the in-memory model
+function deriveProcessIdFromModel(): string | null {
+  try {
+    const canvas = modeler.get('canvas');
+    const root = canvas && canvas.getRootElement && canvas.getRootElement();
+    const bo = root && (root as any).businessObject;
+    if (!bo) return null;
+    // If we're directly on a Process root
+    if (bo.$type === 'bpmn:Process' && bo.id) return String(bo.id);
+    // Try resolving via Definitions.rootElements
+    let defs: any = bo.$parent;
+    while (defs && !Array.isArray((defs as any).rootElements)) defs = defs.$parent;
+    const rootElements = defs && Array.isArray(defs.rootElements) ? defs.rootElements : [];
+    const processEl = rootElements.find((e: any) => e && e.$type === 'bpmn:Process');
+    if (processEl && processEl.id) return String(processEl.id);
+    // Collaboration / Participant case: pick first participant's processRef id
+    if (bo.$type === 'bpmn:Collaboration' && Array.isArray((bo as any).participants)) {
+      const p = (bo as any).participants.find((x: any) => x && x.processRef && x.processRef.id);
+      if (p && p.processRef && p.processRef.id) return String(p.processRef.id);
+    }
+  } catch {}
+  return null;
+}
+
+function getProcessIdForState(state: DiagramTabState): string | null {
+  try { return runWithState(state, () => deriveProcessIdFromModel()) as any; } catch { return null; }
+}
+
+function findTabByProcessId(pid: string): DiagramTabState | null {
+  if (!pid) return null;
+  for (const state of tabStates.values()) {
+    const spid = getProcessIdForState(state);
+    if (spid && spid === pid) return state;
+  }
+  return null;
+}
+
+function computeNextProcessId(): string {
+  let maxN = 0;
+  for (const state of tabStates.values()) {
+    const pid = getProcessIdForState(state) || '';
+    const m = /^Process_(\d+)$/.exec(pid);
+    if (m) {
+      const n = parseInt(m[1], 10) || 0;
+      if (n > maxN) maxN = n;
+    }
+  }
+  const next = Math.max(0, maxN) + 1;
+  return `Process_${next}`;
+}
+
+function createInitialXmlWithProcessId(pid: string): string {
+  try {
+    // Replace process id and the BPMNPlane bpmnElement reference
+    let xml = initialXml;
+    xml = xml.replace(/(<bpmn:process\b[^>]*\bid=")Process_\d+("[^>]*>)/, `$1${pid}$2`);
+    xml = xml.replace(/(bpmnElement=")Process_\d+(")/, `$1${pid}$2`);
+    return xml;
+  } catch {
+    return initialXml;
+  }
+}
+
+async function openXmlConsideringDuplicates(xml: string, fileName?: string, source: 'host' | 'file' | 'unknown' = 'unknown') {
+  const pid = deriveProcessId(xml);
+  const existing = pid ? findTabByProcessId(pid) : null;
+  if (!existing) {
+    const title = pid || (fileName || `Diagramm ${tabSequence}`);
+    createDiagramTab({
+      title,
+      xml,
+      fileName: fileName ? sanitizeFileName(fileName) : undefined,
+      statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen')
+    });
+    return;
+  }
+  // Existing tab detected; if dirty -> warn
+  if (existing.dirty) {
+    const titleMsg = `${pid ? `[${pid}] ` : ''}Diagramm überschreiben?`;
+    const ok = await showConfirmDialog('Es gibt ungespeicherte Änderungen. Änderungen überschreiben?', titleMsg, { okLabel: 'Ja' });
+    if (!ok) { setStatus('Öffnen abgebrochen'); tabsControl?.activate(existing.id); return; }
+  }
+  // Import into existing tab and activate it
+  tabsControl?.activate(existing.id);
+  await bootstrapState(existing, {
+    title: pid || existing.title || 'Diagramm',
+    xml,
+    fileName: fileName ? sanitizeFileName(fileName) : existing.fileName,
+    statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen'),
+    activate: true
+  });
 }
 
 function sanitizeFileName(name: string): string {
@@ -991,12 +1164,7 @@ async function openViaSidecarOrFile() {
       const xml: string = await sidecar.request('doc.load', undefined, 120000);
       if (typeof xml === 'string' && xml.trim()) {
         debug('open: host response', { length: xml.length });
-        const title = deriveProcessId(xml) || 'Host-Diagramm';
-        createDiagramTab({
-          title,
-          xml,
-          statusMessage: 'Aus Host geladen'
-        });
+        await openXmlConsideringDuplicates(xml, undefined, 'host');
         return;
       } else {
         debug('open: host canceled or empty response');
@@ -2155,7 +2323,6 @@ function pruneInvalidCallActivityMappings() {
 }
 
 // Toolbar Events
-$('#btn-new')?.addEventListener('click', () => createNewDiagram());
 $('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
 $('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
 $('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
@@ -2165,5 +2332,5 @@ $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
 $('#btn-fit')?.addEventListener('click', fitViewport);
 
 initTabs();
-createNewDiagram();
+updateEmptyStateVisibility();
 initSidecar();
