@@ -2,8 +2,12 @@ import BpmnModeler from 'bpmn-js/lib/Modeler';
 import { Tabs } from './tabs';
 
 const el = document.getElementById('diagramTabs')!;
-const editors = new Map<string, BpmnModeler>();
+type ModelerInstance = InstanceType<typeof BpmnModeler>;
+
+const editors = new Map<string, ModelerInstance>();
 const savedHash = new Map<string, number>(); // optional für Dirty-Check baseline
+
+let seq = 1;
 
 const tabs = new Tabs(el, {
   onCreatePanel(id, panel) {
@@ -19,6 +23,7 @@ const tabs = new Tabs(el, {
   },
 
   onActivate(id) {
+    if (!id) return;
     // Canvas auf neue Sichtbarkeit reagieren lassen
     const modeler = editors.get(id);
     if (!modeler) return;
@@ -44,16 +49,25 @@ const tabs = new Tabs(el, {
   onDestroyPanel(id, _panel) {
     const modeler = editors.get(id);
     if (modeler) { modeler.destroy(); editors.delete(id); savedHash.delete(id); }
+  },
+
+  onAddRequest() {
+    addDiagram();
   }
 });
 
-// Hilfsfunktionen
-function baseline(id: string, modeler: BpmnModeler) {
-  modeler.saveXML({ format: true }).then(({ xml }) => savedHash.set(id, hash(xml)));
+function addDiagram(title = `Diagram ${seq}`) {
+  const id = `diagram-${seq++}`;
+  tabs.add({ id, title, closable: true });
 }
-async function dirty(id: string, modeler: BpmnModeler) {
+
+// Hilfsfunktionen
+function baseline(id: string, modeler: ModelerInstance) {
+  modeler.saveXML({ format: true }).then(({ xml }: { xml: string }) => savedHash.set(id, hash(xml)));
+}
+async function dirty(id: string, modeler: ModelerInstance) {
   try {
-    const { xml } = await modeler.saveXML({ format: true });
+    const { xml }: { xml: string } = await modeler.saveXML({ format: true });
     const base = savedHash.get(id);
     return typeof base === 'number' ? base !== hash(xml) : false;
   } catch {
@@ -63,14 +77,14 @@ async function dirty(id: string, modeler: BpmnModeler) {
 function hash(s: string) { let h = 0; for (let i=0;i<s.length;i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0; return h; }
 
 // Beispiel: Tabs anlegen
-tabs.add({ id: 'diagram-1', title: 'Process A.bpmn' });
-tabs.add({ id: 'diagram-2', title: 'Order.bpmn' });
+addDiagram('Process A.bpmn');
+addDiagram('Order.bpmn');
 
 // Beispiel: Nach dem Speichern Dirty zurücksetzen und Baseline neu setzen
 async function saveActive(id: string) {
   const modeler = editors.get(id);
   if (!modeler) return;
-  const { xml } = await modeler.saveXML({ format: true });
+  const { xml }: { xml: string } = await modeler.saveXML({ format: true });
   // ... speichern (Filesystem/Backend)
   savedHash.set(id, hash(xml));
   tabs.markDirty(id, false);

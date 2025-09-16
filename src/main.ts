@@ -48,6 +48,11 @@ let activeTabState: DiagramTabState | null = null;
 let tabSequence = 1;
 let untitledCounter = 1;
 
+type StoredActiveMeta = { title?: string | null; fileName?: string | null };
+const STORAGE_LAST_ACTIVE = 'fleditor:lastActiveTab';
+let storedActiveMeta: StoredActiveMeta | null = readStoredActiveMeta();
+let suspendActivePersist = !!storedActiveMeta;
+
 let modeler: any;
 let sidecar: SidecarBridge | null = null;
 let sidecarConnected = false;
@@ -86,6 +91,7 @@ function setActiveTab(id: string | null) {
   if (!id) {
     activeTabState = null;
     modeler = null;
+    persistActiveTab(null);
     return;
   }
   const state = tabStates.get(id);
@@ -96,6 +102,63 @@ function setActiveTab(id: string | null) {
   try {
     state.modeler.get('canvas').resized();
   } catch {}
+  persistActiveTab(state);
+}
+
+function readStoredActiveMeta(): StoredActiveMeta | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_LAST_ACTIVE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as StoredActiveMeta;
+    }
+  } catch {}
+  return null;
+}
+
+function persistActiveTab(state: DiagramTabState | null) {
+  if (suspendActivePersist) return;
+  try {
+    if (!state) {
+      localStorage.removeItem(STORAGE_LAST_ACTIVE);
+    } else {
+      const payload: StoredActiveMeta = {
+        title: state.title || null,
+        fileName: state.fileName || null
+      };
+      localStorage.setItem(STORAGE_LAST_ACTIVE, JSON.stringify(payload));
+    }
+  } catch {}
+}
+
+function maybeRestoreActiveTab(state: DiagramTabState) {
+  if (!storedActiveMeta) {
+    if (suspendActivePersist) suspendActivePersist = false;
+    if (tabsControl?.getActiveId() === state.id) persistActiveTab(state);
+    return;
+  }
+  const matchesFile = storedActiveMeta.fileName && state.fileName && storedActiveMeta.fileName === state.fileName;
+  const matchesTitle = storedActiveMeta.title && state.title && storedActiveMeta.title === state.title;
+  suspendActivePersist = false;
+  if (matchesFile || (!storedActiveMeta.fileName && matchesTitle)) {
+    const targetId = state.id;
+    storedActiveMeta = null;
+    setTimeout(() => { tabsControl?.activate(targetId); }, 0);
+  } else {
+    storedActiveMeta = null;
+  }
+  if (tabsControl?.getActiveId() === state.id) persistActiveTab(state);
+}
+
+function updateStateTitle(state: DiagramTabState, title?: string | null) {
+  const trimmed = (title || '').trim();
+  if (!trimmed || state.title === trimmed) return;
+  state.title = trimmed;
+  tabsControl?.setTitle(state.id, trimmed);
+  if (tabsControl?.getActiveId() === state.id) {
+    persistActiveTab(state);
+  }
 }
 
 function applyPropertyPanelVisibility(state: DiagramTabState) {
@@ -150,6 +213,8 @@ async function updateBaseline(state: DiagramTabState) {
   try {
     const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
     state.baselineHash = hashString(xml);
+    const derivedTitle = deriveProcessId(xml);
+    if (derivedTitle) updateStateTitle(state, derivedTitle);
     setDirtyState(state, false);
   } catch {}
 }
@@ -323,9 +388,9 @@ function bindDragAndDrop(state: DiagramTabState) {
 }
 
 async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
-  state.title = init.title;
-  tabsControl?.setTitle(state.id, init.title);
+  updateStateTitle(state, init.title);
   if (typeof init.fileName === 'string') state.fileName = init.fileName;
+  if (tabsControl?.getActiveId() === state.id) persistActiveTab(state);
 
   let xml = init.xml;
   if (!xml) {
@@ -333,6 +398,8 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
   }
 
   const prepared = init.xml ? normalizeErrorRefOnImport(expandSubProcessShapesInDI(prefixVariableChildrenForImport(xml))) : xml;
+  const inferredTitle = deriveProcessId(prepared);
+  if (inferredTitle) updateStateTitle(state, inferredTitle);
 
   try {
     await runWithState(state, () => state.modeler.importXML(prepared));
@@ -345,6 +412,8 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
     console.error(err);
     alert('Fehler beim Import der Datei.');
     if (tabsControl?.getActiveId() === state.id) setStatus('Import fehlgeschlagen');
+  } finally {
+    maybeRestoreActiveTab(state);
   }
 }
 
@@ -460,6 +529,9 @@ function initTabs() {
           }
         }, 0);
       }
+    },
+    onAddRequest() {
+      createNewDiagram();
     }
   });
 }
@@ -795,6 +867,7 @@ async function saveXML() {
     const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
     download(name, withFlowableHeader, 'application/xml');
     state.fileName = name;
+    persistActiveTab(state);
     await updateBaseline(state);
     setStatus('XML exportiert');
   } catch (err) {
@@ -918,15 +991,13 @@ async function openViaSidecarOrFile() {
       const xml: string = await sidecar.request('doc.load', undefined, 120000);
       if (typeof xml === 'string' && xml.trim()) {
         debug('open: host response', { length: xml.length });
-        const state = getActiveState();
-        if (state) {
-          await bootstrapState(state, {
-            title: state.title || 'Host-Diagramm',
-            xml,
-            statusMessage: 'Aus Host geladen'
-          });
-          return;
-        }
+        const title = deriveProcessId(xml) || 'Host-Diagramm';
+        createDiagramTab({
+          title,
+          xml,
+          statusMessage: 'Aus Host geladen'
+        });
+        return;
       } else {
         debug('open: host canceled or empty response');
         setStatus('Öffnen abgebrochen');
@@ -959,6 +1030,7 @@ async function saveXMLWithSidecarFallback() {
           const fileName = parts[parts.length - 1];
           if (fileName) state.fileName = fileName;
         }
+        persistActiveTab(state);
         await updateBaseline(state);
         setStatus('Über Host gespeichert');
         return;

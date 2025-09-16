@@ -11,6 +11,7 @@ interface TabEvents {
   onClose?(id: TabId): Promise<boolean> | boolean;     // return false, um Schließen zu verhindern
   onCreatePanel?(id: TabId, panelEl: HTMLElement): void;
   onDestroyPanel?(id: TabId, panelEl: HTMLElement): void;
+  onAddRequest?(): void;
 }
 
 export class Tabs {
@@ -19,8 +20,11 @@ export class Tabs {
   private panels: HTMLElement;
   private leftBtn: HTMLButtonElement;
   private rightBtn: HTMLButtonElement;
+  private addBtn: HTMLButtonElement | null;
   private ro: ResizeObserver;
   private currentId: TabId | null = null;
+  private menu: HTMLElement | null = null;
+  private menuTarget: TabId | null = null;
 
   constructor(root: HTMLElement, private events: TabEvents = {}) {
     this.root = root;
@@ -28,6 +32,7 @@ export class Tabs {
     this.panels  = root.querySelector('.panels')!;
     this.leftBtn = root.querySelector('.scroll-btn.left') as HTMLButtonElement;
     this.rightBtn= root.querySelector('.scroll-btn.right') as HTMLButtonElement;
+    this.addBtn  = root.querySelector('.add-tab') as HTMLButtonElement | null;
 
     this.bind();
     this.ro = new ResizeObserver(() => this.updateOverflow());
@@ -48,6 +53,7 @@ export class Tabs {
     btn.setAttribute('aria-selected', 'false');
     btn.setAttribute('aria-controls', `panel-${spec.id}`);
     btn.dataset.tabId = spec.id;
+    btn.dataset.closable = spec.closable === false ? '0' : '1';
     btn.title = spec.title;
 
     const title = document.createElement('span');
@@ -78,6 +84,7 @@ export class Tabs {
     }
 
     btn.addEventListener('click', () => this.activate(spec.id));
+    btn.addEventListener('contextmenu', (e) => this.openContextMenu(e as MouseEvent, spec.id));
     this.tablist.appendChild(btn);
 
     // Panel
@@ -106,6 +113,7 @@ export class Tabs {
     const tab = this.tabById(id);
     const panel = this.panelById(id);
     if (!tab || !panel) return;
+    if (!this.isTabClosable(tab)) return;
 
     const ok = await Promise.resolve(this.events.onClose?.(id) ?? true);
     if (!ok) return;
@@ -164,6 +172,22 @@ export class Tabs {
     tab.title = title;
   }
 
+  async closeOthers(id: TabId) {
+    const tabs = this.getTabs().filter((t) => t.dataset.tabId !== id && this.isTabClosable(t));
+    for (const tab of tabs) {
+      const tabId = tab.dataset.tabId;
+      if (tabId) await this.close(tabId);
+    }
+  }
+
+  async closeAll() {
+    const tabs = this.getTabs().filter((t) => this.isTabClosable(t));
+    for (const tab of tabs) {
+      const tabId = tab.dataset.tabId;
+      if (tabId) await this.close(tabId);
+    }
+  }
+
   /* ---------- internals ---------- */
 
   private bind() {
@@ -214,9 +238,12 @@ export class Tabs {
     // Scroll buttons
     this.leftBtn.addEventListener('click', () => this.smoothStep(-1));
     this.rightBtn.addEventListener('click', () => this.smoothStep(+1));
+    this.addBtn?.addEventListener('click', () => this.events.onAddRequest?.());
 
     // Resize updates
     window.addEventListener('resize', () => this.updateOverflowSoon());
+
+    this.setupContextMenu();
   }
 
   private smoothStep(direction: -1 | 1) {
@@ -259,6 +286,64 @@ export class Tabs {
 
   private tabById(id: TabId)  { return this.tablist.querySelector<HTMLElement>(`.tab[data-tab-id="${id}"]`); }
   private panelById(id: TabId){ return this.panels.querySelector<HTMLElement>(`#panel-${id}`); }
+  private getTabs() { return Array.from(this.tablist.querySelectorAll<HTMLElement>('.tab')); }
+  private isTabClosable(tab: HTMLElement) { return tab.dataset.closable !== '0'; }
 
   destroy() { this.ro.disconnect(); }
+
+  private setupContextMenu() {
+    this.menu = document.createElement('div');
+    this.menu.className = 'tab-menu';
+    this.menu.innerHTML = `
+      <button type="button" data-action="close">Tab schließen</button>
+      <button type="button" data-action="close-others">Andere schließen</button>
+      <button type="button" data-action="close-all">Alle schließen</button>
+    `;
+    this.root.appendChild(this.menu);
+
+    this.menu.addEventListener('click', async (e) => {
+      const action = (e.target as HTMLElement)?.getAttribute('data-action');
+      if (!action) return;
+      const targetId = this.menuTarget;
+      this.hideContextMenu();
+      if (!targetId) return;
+      if (action === 'close') {
+        await this.close(targetId);
+      } else if (action === 'close-others') {
+        await this.closeOthers(targetId);
+      } else if (action === 'close-all') {
+        await this.closeAll();
+      }
+    });
+
+    document.addEventListener('click', () => this.hideContextMenu());
+    document.addEventListener('contextmenu', () => this.hideContextMenu());
+    window.addEventListener('blur', () => this.hideContextMenu());
+  }
+
+  private openContextMenu(evt: MouseEvent, id: TabId) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (!this.menu) return;
+    const tab = this.tabById(id);
+    if (!tab || !this.isTabClosable(tab)) return;
+    this.menuTarget = id;
+    const rect = this.root.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const y = evt.clientY - rect.top;
+    this.menu.classList.add('open');
+    const { offsetWidth, offsetHeight } = this.menu;
+    const maxLeft = Math.max(6, rect.width - offsetWidth - 6);
+    const maxTop = Math.max(6, rect.height - offsetHeight - 6);
+    const left = Math.min(Math.max(6, x), maxLeft);
+    const top = Math.min(Math.max(6, y), maxTop);
+    this.menu.style.left = `${left}px`;
+    this.menu.style.top = `${top}px`;
+  }
+
+  private hideContextMenu() {
+    if (!this.menu) return;
+    this.menuTarget = null;
+    this.menu.classList.remove('open');
+  }
 }
