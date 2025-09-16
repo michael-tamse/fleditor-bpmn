@@ -1,6 +1,7 @@
 import { SidecarBridge } from '../../src/sidecar/bridge';
 import { createDomTransport } from '../../src/sidecar/transports/dom';
 import { PROTOCOL_ID, PROTOCOL_VERSION, type HandshakeAckMsg } from '../../src/sidecar/shared/protocol';
+import { listen } from '@tauri-apps/api/event';
 
 function isTauri(): boolean {
   try { return !!(window as any).__TAURI__; } catch { return false; }
@@ -46,6 +47,8 @@ function isTauri(): boolean {
             { name: 'doc.load' },
             { name: 'doc.save' },
             { name: 'doc.saveSvg' },
+            // host-initiated open of external files
+            { name: 'doc.openExternal' },
             { name: 'ui.setPropertyPanel' },
             { name: 'ui.setMenubar' }
           ]
@@ -136,6 +139,31 @@ function isTauri(): boolean {
       return { ok: false, error: String(e?.message || e) };
     }
   });
+
+  // Listen for native "open-files" events from Rust (single-instance + OS integration)
+  if (isTauri()) {
+    try {
+      listen<string[] | string>('open-files', async ({ payload }) => {
+        try { console.debug('[tauri-host]', 'open-files', payload); } catch {}
+        const paths = Array.isArray(payload) ? payload : [payload];
+        // Read each file and forward to the component to open in new tab(s)
+        const { readTextFile } = await import('@tauri-apps/api/fs');
+        for (const p of paths) {
+          try {
+            const xml = await readTextFile(p);
+            const parts = String(p).split(/[/\\]/);
+            const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
+            // Ask the component to open this XML as a new or existing tab
+            await host.request('doc.openExternal', { xml, fileName }, 120000);
+          } catch (e) {
+            try { console.debug('[tauri-host]', 'failed to open file', p, e); } catch {}
+          }
+        }
+      });
+    } catch (e) {
+      try { console.debug('[tauri-host]', 'listen open-files failed', e); } catch {}
+    }
+  }
 
   // Cleanup on unload
   window.addEventListener('unload', () => { try { unlisten && unlisten(); } catch {} host.dispose(); });

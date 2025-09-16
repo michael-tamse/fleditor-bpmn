@@ -1238,6 +1238,19 @@ function initSidecar() {
       return { ok: true };
     });
 
+    // Host-initiated open of external files (e.g., OS double-click association)
+    sidecar.onRequest('doc.openExternal', async (p: any) => {
+      try {
+        const xml = String(p?.xml ?? '');
+        if (!xml.trim()) return { ok: false };
+        const fileName = typeof p?.fileName === 'string' ? sanitizeFileName(p.fileName) : undefined;
+        await openXmlConsideringDuplicates(xml, fileName, 'host');
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: String(e?.message || e) } as any;
+      }
+    });
+
     // Start handshake; if no host responds, keep retrying briefly to avoid race
     let handshakeAttempts = 0;
     const tryHandshake = () => {

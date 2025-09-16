@@ -8,6 +8,7 @@ export type OperationName =
   | 'doc.load'
   | 'doc.save'
   | 'doc.saveSvg'
+  | 'doc.openExternal'
   | 'ui.setPropertyPanel'
   | 'ui.setMenubar';
 
