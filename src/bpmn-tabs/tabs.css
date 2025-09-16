@@ -1,0 +1,65 @@
+.tabs { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+
+.tabbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: .25rem;
+  padding: 4px 12px 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.scroll-btn { visibility: hidden; opacity: .6; border: 0; background: none; padding: .25rem .5rem; cursor: pointer; color: var(--muted); }
+.scroll-btn.visible { visibility: visible; }
+
+.tablist {
+  display: flex;
+  gap: .25rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;          /* Firefox */
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}
+.tablist:focus { outline: none; }
+
+.tab {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem .6rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: .5rem .5rem 0 0;
+  background: var(--panel);
+  cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--bg); box-shadow: 0 -2px 0 0 var(--accent) inset; border-color: var(--border); }
+.tab:focus-visible { outline: 2px solid #4a90e2; outline-offset: 2px; }
+
+.tab .title { white-space: nowrap; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }
+.tab .dirty { width: .5rem; height: .5rem; border-radius: 50%; background: #e67e22; display: none; }
+.tab[data-dirty="true"] .dirty { display: inline-block; }
+
+.tab .close {
+  border: 0; background: none; cursor: pointer; font: inherit; line-height: 1;
+  opacity: .7;
+}
+.tab .close:hover { opacity: 1; }
+
+.panels {
+  position: relative;
+  padding: 0;
+  min-height: 240px;
+  border-top: 1px solid var(--border);
+  flex: 1;
+  min-height: 0;
+}
+.tabpanel { display: none; width: 100%; height: 100%; min-height: 0; }
+.tabpanel[aria-hidden="false"] { display: block; }
+
+/* Optional: Scroll Snap für „Tab-für-Tab“-Scrolling */
+.tablist { scroll-snap-type: x mandatory; }
+.tab { scroll-snap-align: start; }

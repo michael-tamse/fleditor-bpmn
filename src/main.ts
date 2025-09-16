@@ -12,12 +12,43 @@ import flowableModdle from './flowable-moddle';
 import { SidecarBridge } from './sidecar/bridge';
 import { createDomTransport } from './sidecar/transports/dom';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
+import { Tabs } from './bpmn-tabs/tabs';
+import './bpmn-tabs/tabs.css';
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
+interface DiagramTabState {
+  id: string;
+  modeler: BpmnModeler;
+  panelEl: HTMLElement;
+  layoutEl: HTMLElement;
+  canvasEl: HTMLElement;
+  propertiesEl: HTMLElement;
+  title: string;
+  fileName?: string;
+  dirty: boolean;
+  baselineHash?: number;
+  dirtyTimer?: any;
+  isImporting: boolean;
+}
+
+interface DiagramInit {
+  title: string;
+  xml?: string;
+  fileName?: string;
+  statusMessage?: string;
+  activate?: boolean;
+}
+
+const tabStates = new Map<string, DiagramTabState>();
+const pendingTabInits = new Map<string, DiagramInit>();
+let tabsControl: Tabs | null = null;
+let activeTabState: DiagramTabState | null = null;
+let tabSequence = 1;
+let untitledCounter = 1;
+
 let modeler: any;
-let isImporting = false;
 let sidecar: SidecarBridge | null = null;
 let sidecarConnected = false;
 
@@ -47,173 +78,398 @@ function setStatus(msg?: string) {
   statusEl.textContent = msg || '';
 }
 
-function initModeler() {
-  if (modeler) return;
+function getActiveState(): DiagramTabState | null {
+  return activeTabState;
+}
 
-  modeler = new BpmnModeler({
-    container: '#canvas',
-    propertiesPanel: { parent: '#properties' },
-    additionalModules: [
-      BpmnPropertiesPanelModule,
-      BpmnPropertiesProviderModule,
-      FlowablePropertiesProviderModule
-    ],
-    moddleExtensions: { flowable: flowableModdle }
-  });
-
+function setActiveTab(id: string | null) {
+  if (!id) {
+    activeTabState = null;
+    modeler = null;
+    return;
+  }
+  const state = tabStates.get(id);
+  if (!state) return;
+  activeTabState = state;
+  modeler = state.modeler;
+  applyPropertyPanelVisibility(state);
   try {
-    const panelSvc = modeler.get('propertiesPanel', false);
-    if (panelSvc && typeof panelSvc.attachTo === 'function') {
-      panelSvc.attachTo('#properties');
-    }
-  } catch (e) {}
-
-  // Notify host on changes (throttled) if sidecar is connected
-  try {
-    const eventBus = modeler.get('eventBus');
-    let t: any;
-    if (eventBus) {
-      eventBus.on('commandStack.changed', () => {
-        if (!hostAvailable()) return;
-        clearTimeout(t);
-        t = setTimeout(() => {
-          try { sidecar?.emitEvent('doc.changed', { dirty: true }); debug('event: doc.changed -> host'); } catch {}
-        }, 250);
-      });
-    }
+    state.modeler.get('canvas').resized();
   } catch {}
+}
 
-  // Persist defaults for CallActivity on creation, avoid during import
+function applyPropertyPanelVisibility(state: DiagramTabState) {
+  const layout = state.layoutEl;
+  if (!layout) return;
+  if (propertyPanelVisible) {
+    layout.classList.remove('hide-properties');
+    state.propertiesEl.style.display = '';
+  } else {
+    layout.classList.add('hide-properties');
+    state.propertiesEl.style.display = 'none';
+  }
+  if (tabsControl?.getActiveId() === state.id) {
+    try { state.modeler.get('canvas').resized(); } catch {}
+  }
+}
+
+function runWithState<T>(state: DiagramTabState, fn: () => T | Promise<T>): T | Promise<T> {
+  const prev = modeler;
+  modeler = state.modeler;
+  let sync = true;
   try {
-    const eventBus = modeler.get('eventBus');
-    const modeling = modeler.get('modeling');
-    const bpmnReplace = modeler.get('bpmnReplace');
-    if (eventBus && modeling) {
-      eventBus.on('import.render.start', () => { isImporting = true; });
-      eventBus.on('import.done', () => { isImporting = false; });
-      eventBus.on('shape.added', (e: any) => {
-        if (isImporting) return;
-        const el = e && e.element;
-        const bo = el && el.businessObject;
-        // Defaults for new ReceiveTask: correlation parameter
-        try {
-          if (bo && bo.$type === 'bpmn:ReceiveTask') {
-            const bpmnFactory = modeler.get('bpmnFactory');
-            const modeling = modeler.get('modeling');
-            const eventBus = modeler.get('eventBus');
-            if (bpmnFactory && modeling) {
-              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
-              if (!ext) {
-                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
-                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
-              }
-              const values = (ext.get ? ext.get('values') : ext.values) || [];
-              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter' || String(v && v.$type) === 'flowable:eventCorrelationParameter');
-              if (!hasCorr) {
-                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
-                  name: 'businessKey',
-                  value: '${execution.getProcessInstanceBusinessKey()}'
-                });
-                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
-                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
-              }
+    const result = fn();
+    if (result && typeof (result as any).then === 'function') {
+      sync = false;
+      return (result as Promise<T>).finally(() => { modeler = prev; });
+    }
+    return result;
+  } finally {
+    if (sync) modeler = prev;
+  }
+}
+
+function setDirtyState(state: DiagramTabState, dirty: boolean) {
+  if (state.dirty === dirty) return;
+  state.dirty = dirty;
+  tabsControl?.markDirty(state.id, dirty);
+  if (tabsControl?.getActiveId() === state.id && hostAvailable()) {
+    try { sidecar?.emitEvent('doc.changed', { dirty }); debug('event: doc.changed -> host'); } catch {}
+  }
+}
+
+function hashString(s: string) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+  }
+  return h;
+}
+
+async function updateBaseline(state: DiagramTabState) {
+  try {
+    const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
+    state.baselineHash = hashString(xml);
+    setDirtyState(state, false);
+  } catch {}
+}
+
+function scheduleDirtyCheck(state: DiagramTabState) {
+  if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
+  state.dirtyTimer = setTimeout(async () => {
+    try {
+      const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
+      if (typeof state.baselineHash === 'number') {
+        setDirtyState(state, hashString(xml) !== state.baselineHash);
+      } else {
+        setDirtyState(state, true);
+      }
+    } catch {
+      setDirtyState(state, true);
+    }
+  }, 300);
+}
+
+function bindModelerEvents(state: DiagramTabState) {
+  const eventBus = state.modeler.get('eventBus');
+  if (eventBus) {
+    eventBus.on('commandStack.changed', () => scheduleDirtyCheck(state));
+    eventBus.on('import.render.start', () => { state.isImporting = true; });
+    eventBus.on('import.done', () => { state.isImporting = false; });
+    eventBus.on('shape.added', (e: any) => {
+      if (state.isImporting) return;
+      handleShapeAdded(state, e);
+    });
+  }
+
+  state.modeler.on('import.done', () => {
+    runWithState(state, () => {
+      sanitizeModel();
+      migrateAsyncFlags();
+      ensureCallActivityDefaults();
+    });
+  });
+}
+
+function handleShapeAdded(state: DiagramTabState, e: any) {
+  runWithState(state, () => {
+    const el = e && e.element;
+    const bo = el && el.businessObject;
+    if (!bo) return;
+    try {
+      if (bo.$type === 'bpmn:ReceiveTask') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+          if (!ext) {
+            ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+            modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+          }
+          const values = (ext.get ? ext.get('values') : ext.values) || [];
+          const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+          if (!hasCorr) {
+            const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+              name: 'businessKey',
+              value: '${execution.getProcessInstanceBusinessKey()}'
+            });
+            modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+            try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+          }
+        }
+      }
+      if (bo.$type === 'bpmn:IntermediateCatchEvent') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+          if (!ext) {
+            ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+            modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+          }
+          const values = (ext.get ? ext.get('values') : ext.values) || [];
+          const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+          if (!hasCorr) {
+            const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+              name: 'businessKey',
+              value: '${execution.getProcessInstanceBusinessKey()}'
+            });
+            modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+            try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+          }
+        }
+      }
+      if (bo.$type === 'bpmn:BoundaryEvent') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          const defs = Array.isArray((bo as any).eventDefinitions) ? (bo as any).eventDefinitions : [];
+          const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
+          const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
+          if (!hasTimer && !hasError) {
+            let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+            if (!ext) {
+              ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+              modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+            }
+            const values = (ext.get ? ext.get('values') : ext.values) || [];
+            const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+            if (!hasCorr) {
+              const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+                name: 'businessKey',
+                value: '${execution.getProcessInstanceBusinessKey()}'
+              });
+              modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+              try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
             }
           }
-          // Defaults for new IntermediateCatchEvent: correlation parameter
-          if (bo && bo.$type === 'bpmn:IntermediateCatchEvent') {
-            const bpmnFactory = modeler.get('bpmnFactory');
-            const modeling = modeler.get('modeling');
-            const eventBus = modeler.get('eventBus');
-            if (bpmnFactory && modeling) {
-              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
-              if (!ext) {
-                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
-                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
-              }
-              const values = (ext.get ? ext.get('values') : ext.values) || [];
-              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
-              if (!hasCorr) {
-                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
-                  name: 'businessKey',
-                  value: '${execution.getProcessInstanceBusinessKey()}'
-                });
-                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
-                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
-              }
-            }
+        }
+      }
+      if (bo.$type === 'bpmn:StartEvent') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+          if (!ext) {
+            ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+            modeling.updateModdleProperties(el, bo, { extensionElements: ext });
           }
-          // Defaults for new BoundaryEvent: correlation parameter (skip for timer/error)
-          if (bo && bo.$type === 'bpmn:BoundaryEvent') {
-            const bpmnFactory = modeler.get('bpmnFactory');
-            const modeling = modeler.get('modeling');
-            const eventBus = modeler.get('eventBus');
-            if (bpmnFactory && modeling) {
-              const defs = Array.isArray((bo as any).eventDefinitions) ? (bo as any).eventDefinitions : [];
-              const hasTimer = defs.some((d: any) => d && d.$type === 'bpmn:TimerEventDefinition');
-              const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
-              if (hasTimer || hasError) return;
-              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
-              if (!ext) {
-                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
-                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
-              }
-              const values = (ext.get ? ext.get('values') : ext.values) || [];
-              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
-              if (!hasCorr) {
-                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
-                  name: 'businessKey',
-                  value: '${execution.getProcessInstanceBusinessKey()}'
-                });
-                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
-                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
-              }
-            }
+          const values = (ext.get ? ext.get('values') : ext.values) || [];
+          const hasEventType = values.some((v: any) => String(v && v.$type) === 'flowable:EventType');
+          const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
+          if (!hasCorr && hasEventType) {
+            const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
+              name: 'businessKey',
+              value: '${execution.getProcessInstanceBusinessKey()}'
+            });
+            modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
+            try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
           }
-          // Defaults for new StartEvent: correlation parameter (message-style only if event metadata present)
-          if (bo && bo.$type === 'bpmn:StartEvent') {
-            const bpmnFactory = modeler.get('bpmnFactory');
-            const modeling = modeler.get('modeling');
-            const eventBus = modeler.get('eventBus');
-            if (bpmnFactory && modeling) {
-              let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
-              if (!ext) {
-                ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
-                modeling.updateModdleProperties(el, bo, { extensionElements: ext });
-              }
-              const values = (ext.get ? ext.get('values') : ext.values) || [];
-              const hasEventType = values.some((v: any) => String(v && v.$type) === 'flowable:EventType');
-              const hasCorr = values.some((v: any) => String(v && v.$type) === 'flowable:EventCorrelationParameter');
-              if (!hasCorr && hasEventType) {
-                const corr = bpmnFactory.create('flowable:EventCorrelationParameter', {
-                  name: 'businessKey',
-                  value: '${execution.getProcessInstanceBusinessKey()}'
-                });
-                modeling.updateModdleProperties(el, ext, { values: values.concat([ corr ]) });
-                try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
-              }
-            }
-          }
-        } catch {}
-        if (bo && bo.$type === 'bpmn:CallActivity') {
-          const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
-          const updates: any = {};
-          if (typeof get('flowable:inheritBusinessKey') === 'undefined' && !get('flowable:businessKey')) updates['flowable:inheritBusinessKey'] = true;
-          if (typeof get('flowable:inheritVariables') === 'undefined') updates['flowable:inheritVariables'] = true;
-          if (Object.keys(updates).length) {
+        }
+      }
+      if (bo.$type === 'bpmn:CallActivity') {
+        const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
+        const updates: any = {};
+        if (typeof get('flowable:inheritBusinessKey') === 'undefined' && !get('flowable:businessKey')) updates['flowable:inheritBusinessKey'] = true;
+        if (typeof get('flowable:inheritVariables') === 'undefined') updates['flowable:inheritVariables'] = true;
+        if (Object.keys(updates).length) {
+          const modeling = modeler.get('modeling');
+          if (modeling) {
             try { modeling.updateProperties(el, updates); } catch {}
           }
         }
-      });
+      }
+    } catch {}
+  });
+}
+
+function bindDragAndDrop(state: DiagramTabState) {
+  const target = state.canvasEl;
+  if (!target) return;
+  const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((evt) => {
+    target.addEventListener(evt, stop, false);
+  });
+  target.addEventListener('drop', (e: Event) => {
+    const file = (e as DragEvent).dataTransfer?.files?.[0];
+    if (file) {
+      openFileIntoState(file, state);
     }
-  } catch {}
+  });
+}
 
-  customizeProviders();
-  createNew();
+async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
+  state.title = init.title;
+  tabsControl?.setTitle(state.id, init.title);
+  if (typeof init.fileName === 'string') state.fileName = init.fileName;
 
-  modeler.on('import.done', () => {
-    sanitizeModel();
-    migrateAsyncFlags();
-    ensureCallActivityDefaults();
+  let xml = init.xml;
+  if (!xml) {
+    xml = initialXml;
+  }
+
+  const prepared = init.xml ? normalizeErrorRefOnImport(expandSubProcessShapesInDI(prefixVariableChildrenForImport(xml))) : xml;
+
+  try {
+    await runWithState(state, () => state.modeler.importXML(prepared));
+    runWithState(state, () => {
+      try { state.modeler.get('canvas').zoom('fit-viewport', 'auto'); } catch {}
+    });
+    await updateBaseline(state);
+    if (init.statusMessage && tabsControl?.getActiveId() === state.id) setStatus(init.statusMessage);
+  } catch (err) {
+    console.error(err);
+    alert('Fehler beim Import der Datei.');
+    if (tabsControl?.getActiveId() === state.id) setStatus('Import fehlgeschlagen');
+  }
+}
+
+function setupModelerForState(state: DiagramTabState) {
+  runWithState(state, () => {
+    try {
+      const panelSvc = state.modeler.get('propertiesPanel', false);
+      if (panelSvc && typeof panelSvc.attachTo === 'function') {
+        panelSvc.attachTo(state.propertiesEl);
+      }
+    } catch {}
+    customizeProviders();
+  });
+  bindModelerEvents(state);
+  bindDragAndDrop(state);
+  applyPropertyPanelVisibility(state);
+}
+
+function createDiagramTab(init: DiagramInit) {
+  if (!tabsControl) return;
+  const id = `diagram-${tabSequence++}`;
+  pendingTabInits.set(id, init);
+  tabsControl.add({ id, title: init.title, closable: true });
+  if (init.activate !== false) {
+    tabsControl.activate(id);
+  }
+}
+
+function initTabs() {
+  const root = $('#diagramTabs');
+  if (!root) {
+    console.error('Tab-Container nicht gefunden');
+    return;
+  }
+
+  tabsControl = new Tabs(root, {
+    onCreatePanel(id, panel) {
+      const layout = document.createElement('div');
+      layout.className = 'diagram-pane';
+
+      const canvas = document.createElement('div');
+      canvas.className = 'canvas';
+      canvas.setAttribute('aria-label', 'BPMN Arbeitsfläche');
+
+      const props = document.createElement('aside');
+      props.className = 'properties';
+      props.setAttribute('aria-label', 'Eigenschaften');
+
+      layout.append(canvas, props);
+      panel.appendChild(layout);
+
+      const instance = new BpmnModeler({
+        container: canvas,
+        propertiesPanel: { parent: props },
+        additionalModules: [
+          BpmnPropertiesPanelModule,
+          BpmnPropertiesProviderModule,
+          FlowablePropertiesProviderModule
+        ],
+        moddleExtensions: { flowable: flowableModdle }
+      });
+
+      const state: DiagramTabState = {
+        id,
+        modeler: instance,
+        panelEl: panel,
+        layoutEl: layout,
+        canvasEl: canvas,
+        propertiesEl: props,
+        title: '',
+        dirty: false,
+        isImporting: false
+      };
+
+      tabStates.set(id, state);
+      setupModelerForState(state);
+
+      const init = pendingTabInits.get(id) ?? {
+        title: `Diagramm ${tabSequence}`,
+        xml: initialXml,
+        statusMessage: 'Neues Diagramm geladen'
+      };
+      pendingTabInits.delete(id);
+
+      bootstrapState(state, init).catch((err) => {
+        console.error(err);
+      });
+    },
+    onActivate(id) {
+      setActiveTab(id ?? null);
+    },
+    async onClose(id) {
+      const state = tabStates.get(id);
+      if (!state) return true;
+      if (!state.dirty) return true;
+      return confirm('Es gibt ungespeicherte Änderungen. Tab trotzdem schließen?');
+    },
+    onDestroyPanel(id) {
+      pendingTabInits.delete(id);
+      const state = tabStates.get(id);
+      if (!state) return;
+      if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
+      try { state.modeler.destroy(); } catch {}
+      tabStates.delete(id);
+      if (activeTabState && activeTabState.id === id) {
+        activeTabState = null;
+        modeler = null;
+      }
+      if (!tabStates.size) {
+        setTimeout(() => {
+          if (!tabStates.size) {
+            createNewDiagram();
+          }
+        }, 0);
+      }
+    }
+  });
+}
+
+function createNewDiagram() {
+  const title = `Unbenannt ${untitledCounter++}`;
+  createDiagramTab({
+    title,
+    xml: undefined,
+    statusMessage: 'Neues Diagramm geladen'
   });
 }
 
@@ -466,46 +722,54 @@ const initialXml = `<?xml version="1.0" encoding="UTF-8"?>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
-async function createNew() {
+async function openFileAsTab(file: File) {
+  if (!file) return;
   try {
-    await modeler.importXML(initialXml);
-    const canvas = modeler.get('canvas');
-    canvas.zoom('fit-viewport', 'auto');
-    setStatus('Neues Diagramm geladen');
+    const raw = await file.text();
+    const title = file.name || `Datei ${tabSequence}`;
+    const status = file.name ? `Geladen: ${file.name}` : 'Datei geladen';
+    createDiagramTab({
+      title,
+      xml: raw,
+      fileName: sanitizeFileName(file.name || 'diagram.bpmn20.xml'),
+      statusMessage: status
+    });
   } catch (err) {
     console.error(err);
-    alert('Fehler beim Erstellen eines neuen Diagramms');
-    setStatus('Fehler beim Laden');
+    alert('Fehler beim Import der Datei.');
+    setStatus('Import fehlgeschlagen');
   }
 }
 
-async function openFile(file: File) {
+async function openFileIntoState(file: File, state: DiagramTabState) {
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      const raw = (e.target as FileReader).result as string;
-      const pre = prefixVariableChildrenForImport(raw);
-      const expanded = expandSubProcessShapesInDI(pre);
-      const normalizedErrors = normalizeErrorRefOnImport(expanded);
-      await modeler.importXML(normalizedErrors);
-      sanitizeModel();
-      modeler.get('canvas').zoom('fit-viewport', 'auto');
-      setStatus(`Geladen: ${file.name}`);
-    } catch (err) {
-      console.error(err);
-      alert('Fehler beim Import der Datei.');
-      setStatus('Import fehlgeschlagen');
+  try {
+    const raw = await file.text();
+    const title = file.name || state.title || `Datei ${tabSequence}`;
+    await bootstrapState(state, {
+      title,
+      xml: raw,
+      fileName: sanitizeFileName(file.name || state.fileName || 'diagram.bpmn20.xml'),
+      statusMessage: file.name ? `Geladen: ${file.name}` : 'Datei geladen'
+    });
+    if (tabsControl?.getActiveId() === state.id) {
+      setActiveTab(state.id);
     }
-  };
-  reader.readAsText(file);
+  } catch (err) {
+    console.error(err);
+    alert('Fehler beim Import der Datei.');
+    setStatus('Import fehlgeschlagen');
+  }
 }
 
 function triggerOpen() {
   const input = $('#file-input');
   if (!input) return;
   (input as HTMLInputElement).value = '';
-  (input as HTMLInputElement).onchange = () => openFile((input as HTMLInputElement).files![0]);
+  (input as HTMLInputElement).onchange = () => {
+    const file = (input as HTMLInputElement).files?.[0];
+    if (file) openFileAsTab(file);
+  };
   (input as HTMLInputElement).click();
 }
 
@@ -521,6 +785,8 @@ function sanitizeFileName(name: string): string {
 }
 
 async function saveXML() {
+  const state = getActiveState();
+  if (!state) return;
   try {
     const withFlowableHeader = await prepareXmlForExport();
     // Browser default: trigger download (or use host via saveXMLWithSidecarFallback)
@@ -528,6 +794,8 @@ async function saveXML() {
     const pid = deriveProcessId(withFlowableHeader);
     const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
     download(name, withFlowableHeader, 'application/xml');
+    state.fileName = name;
+    await updateBaseline(state);
     setStatus('XML exportiert');
   } catch (err) {
     console.error(err);
@@ -536,6 +804,7 @@ async function saveXML() {
 }
 
 async function saveSVG() {
+  if (!modeler) return;
   try {
     const { svg } = await modeler.saveSVG();
     // compute suggested name based on current process id
@@ -555,6 +824,7 @@ async function saveSVG() {
 }
 
 async function saveSVGWithSidecarFallback() {
+  if (!modeler) return;
   try {
     const { svg } = await modeler.saveSVG();
     if (hostAvailable() && sidecar) {
@@ -637,8 +907,7 @@ function setMenubarVisible(visible: boolean) {
 
 function setPropertyPanelVisible(visible: boolean) {
   propertyPanelVisible = !!visible;
-  const prop = document.querySelector<HTMLElement>('#properties');
-  if (prop) prop.style.display = propertyPanelVisible ? '' : 'none';
+  tabStates.forEach((state) => applyPropertyPanelVisibility(state));
 }
 
 async function openViaSidecarOrFile() {
@@ -649,14 +918,15 @@ async function openViaSidecarOrFile() {
       const xml: string = await sidecar.request('doc.load', undefined, 120000);
       if (typeof xml === 'string' && xml.trim()) {
         debug('open: host response', { length: xml.length });
-        const pre = prefixVariableChildrenForImport(xml);
-        const expanded = expandSubProcessShapesInDI(pre);
-        const normalizedErrors = normalizeErrorRefOnImport(expanded);
-        await modeler.importXML(normalizedErrors);
-        sanitizeModel();
-        modeler.get('canvas').zoom('fit-viewport', 'auto');
-        setStatus('Aus Host geladen');
-        return;
+        const state = getActiveState();
+        if (state) {
+          await bootstrapState(state, {
+            title: state.title || 'Host-Diagramm',
+            xml,
+            statusMessage: 'Aus Host geladen'
+          });
+          return;
+        }
       } else {
         debug('open: host canceled or empty response');
         setStatus('Öffnen abgebrochen');
@@ -674,6 +944,8 @@ async function openViaSidecarOrFile() {
 }
 
 async function saveXMLWithSidecarFallback() {
+  const state = getActiveState();
+  if (!state) return;
   try {
     const xml = await prepareXmlForExport();
     if (hostAvailable() && sidecar) {
@@ -681,8 +953,14 @@ async function saveXMLWithSidecarFallback() {
       const res: any = await sidecar.request('doc.save', { xml }, 120000);
       if (res && res.ok) {
         debug('save: host ok', { path: (res && res.path) || undefined });
+        const path = typeof res.path === 'string' ? res.path : undefined;
+        if (path) {
+          const parts = path.split(/[/\\]/);
+          const fileName = parts[parts.length - 1];
+          if (fileName) state.fileName = fileName;
+        }
+        await updateBaseline(state);
         setStatus('Über Host gespeichert');
-        try { sidecar?.emitEvent('doc.changed', { dirty: false }); debug('event: doc.changed=false -> host'); } catch {}
         return;
       }
       if (res && res.canceled) {
@@ -1618,16 +1896,19 @@ function ensureDmnDefaultsForDecisionTasks() {
 }
 
 function zoom(delta: number) {
+  if (!modeler) return;
   const canvas = modeler.get('canvas');
   const current = canvas.zoom();
   canvas.zoom(Math.max(0.2, Math.min(4, current + delta)));
 }
 
 function zoomReset() {
+  if (!modeler) return;
   modeler.get('canvas').zoom(1);
 }
 
 function fitViewport() {
+  if (!modeler) return;
   modeler.get('canvas').zoom('fit-viewport', 'auto');
 }
 
@@ -1801,23 +2082,8 @@ function pruneInvalidCallActivityMappings() {
   }
 }
 
-// Drag & Drop Import
-function setupDragAndDrop() {
-  const target = $<HTMLElement>('#canvas');
-  if (!target) return;
-  const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
-  const dragEvents: Array<keyof HTMLElementEventMap> = ['dragenter', 'dragover', 'dragleave', 'drop'];
-  dragEvents.forEach((evt) => {
-    target.addEventListener(evt, stop as EventListener, false);
-  });
-  target.addEventListener('drop', (e: Event) => {
-    const file = (e as DragEvent).dataTransfer?.files?.[0] as File | undefined;
-    if (file) openFile(file);
-  });
-}
-
 // Toolbar Events
-$('#btn-new')?.addEventListener('click', createNew);
+$('#btn-new')?.addEventListener('click', () => createNewDiagram());
 $('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
 $('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
 $('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
@@ -1826,6 +2092,6 @@ $('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
 $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
 $('#btn-fit')?.addEventListener('click', fitViewport);
 
-setupDragAndDrop();
-initModeler();
+initTabs();
+createNewDiagram();
 initSidecar();

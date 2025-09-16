@@ -32,9 +32,13 @@
     </header>
 
     <main class="editor">
-      <div class="panes">
-        <div id="canvas" class="canvas" aria-label="BPMN Arbeitsfläche"></div>
-        <aside id="properties" class="properties" aria-label="Eigenschaften"></aside>
+      <div class="tabs" id="diagramTabs">
+        <div class="tabbar">
+          <button class="scroll-btn left" aria-hidden="true" tabindex="-1" title="Nach links scrollen">◀</button>
+          <div class="tablist" role="tablist" aria-label="Geöffnete Diagramme"></div>
+          <button class="scroll-btn right" aria-hidden="true" tabindex="-1" title="Nach rechts scrollen">▶</button>
+        </div>
+        <div class="panels"></div>
       </div>
     </main>
 
