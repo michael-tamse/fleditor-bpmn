@@ -29,6 +29,11 @@ Note: Large bundle warnings are expected; not a blocker.
 - `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types) including Event/Mapping/Variable Aggregation/Start Correlation types.
 - `src/flowable-properties-provider.ts`: Custom properties provider logic. Adds/adjusts entries and groups and integrates with the default provider.
 - `styles.css`, `index.html`: Base UI shell.
+- Tabs (multi‑diagram support):
+  - `src/bpmn-tabs/tabs.ts`: Accessible tabs manager (add/activate/close, overflow scroll buttons, keyboard support, context menu, dirty marker).
+  - `src/bpmn-tabs/tabs.css`: Styles for tab bar, panels, overflow arrows, add button, context menu.
+  - `src/bpmn-tabs/tabs.html`: Markup reference used by `index.html`.
+  - `src/bpmn-tabs/tabs-usage-bpmn.ts`: Standalone demo usage for tabs + bpmn-js (not used by app boot, for reference/tests).
  - Sidecar (component ↔ host interface):
  - `src/sidecar/shared/protocol.ts`: PROTOCOL_ID/Version, message types (handshake, req/res, events, error), capabilities, operation names.
    - `src/sidecar/transports/dom.ts`: DOM CustomEvent transport (Angular/same-window).
@@ -44,6 +49,36 @@ Note: Large bundle warnings are expected; not a blocker.
 Quick anchors (open in IDE):
 - `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
 - `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save`/`doc.saveSvg` fallbacks.
+- Tabs integration in `src/main.ts` → `DiagramTabState`, `initTabs`, `createDiagramTab`, per‑tab modeler lifecycle, dirty/baseline handling, last‑active persistence.
+
+## Tabs (Multi‑Diagram)
+- Overview: The editor supports multiple BPMN diagrams in parallel via an accessible tab system. Each tab owns a separate `bpmn-js` Modeler and its Properties Panel.
+- Files: `src/bpmn-tabs/tabs.ts`, `src/bpmn-tabs/tabs.css`, `index.html` (tabbar markup), optional demo `src/bpmn-tabs/tabs-usage-bpmn.ts`.
+- UX:
+  - Add button in the tabbar creates a new diagram tab.
+  - Context menu per tab: Close, Close Others, Close All. Ctrl/Cmd+W closes the active tab; middle‑click closes a tab.
+  - Overflow arrows appear when the tablist scrolls horizontally; keyboard nav uses Left/Right/Home/End and Enter/Space to activate.
+  - Dirty indicator (●) on tab when unsaved changes exist (tracked via hashed XML baseline).
+  - Properties panel visibility applies per active tab (layout stays consistent).
+- Integration:
+  - `src/main.ts` manages tabs via `DiagramTabState` objects stored in a Map: `{ id, modeler, panelEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash? }`.
+  - Use helpers: `runWithState(state, fn)` to execute logic against a specific modeler; `updateBaseline(state)` to reset dirty after save/import; `setDirtyState(state, dirty)` to update UI and emit `doc.changed` for the active tab.
+  - Active tab is persisted in `localStorage` (`fleditor:lastActiveTab`) with `{ title?, fileName? }` so the last active tab can be restored heuristically on reload.
+  - Host open (`doc.load`) creates a new tab with the received XML; local file open creates a new tab too. Drag & drop onto a canvas imports into that specific tab.
+  - Saving (host/browser) updates the tab’s baseline and clears dirty; suggested filenames derive from current `process@id` and are sanitized.
+
+### Tabs Do / Don’t
+- Do: Create and destroy Modeler instances per tab; don’t share a singleton across tabs.
+- Do: Route all per‑tab operations via `runWithState(state, ...)` to ensure the correct modeler is active.
+- Do: When mutating model content before export, call the existing helpers (e.g., `ensureCallActivityDefaults()`, `ensureCorrelationParameterFor*`) inside the active state.
+- Don’t: Access `modeler`-globals from outside active tab context; set `modeler = state.modeler` via `runWithState` instead of reassigning globally.
+- Don’t: Bypass the tabs dirty/baseline helpers; always call `updateBaseline(state)` after successful imports/saves.
+
+### Markup & Styles
+- `index.html` swaps the single canvas for:
+  - `<div class="tabs" id="diagramTabs">` with a `.tabbar` holding left/right scroll buttons, the `.tablist`, and a `button.add-tab`.
+  - `.panels` contains per‑tab `.tabpanel` roots; each panel hosts a two‑column layout (`.diagram-pane`) with `.canvas` and `.properties`.
+- `styles.css` defines `.diagram-pane` and responsive behavior; `src/bpmn-tabs/tabs.css` styles the tabbar/panels.
 
 ## Sidecar Integration
 - Overview: The editor runs standalone, but can integrate with an external host (Angular, Tauri, Browser) via a versioned, bidirectional interface.
@@ -68,7 +103,7 @@ Quick anchors (open in IDE):
   - The host iframe-loads `/index.html` (the editor) and sends `handshake:ack`.
   - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
   - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
-  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` herunter (ersatzweise `diagram.bpmn20.xml`).
+  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` herunter (ersatzweise `diagram.bpmn20.xml`). Nach erfolgreichem Speichern setzt der aktive Tab seine Baseline (Dirty‑Dot verschwindet).
   - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `<processId>.svg` herunter (ersatzweise `diagram.svg`).
 
 ### Host Security
