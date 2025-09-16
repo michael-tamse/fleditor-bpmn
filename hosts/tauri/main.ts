@@ -21,9 +21,14 @@ function isTauri(): boolean {
     return name.replace(/[\\/:*?"<>|\n\r]+/g, '_');
   }
 
-  // Respond to handshake:init with capabilities
+  // Respond to handshake:init with capabilities only in Tauri environment
   const unlisten = transport.onMessage((msg) => {
     if (msg.protocol === PROTOCOL_ID && msg.kind === 'handshake:init') {
+      // In browser dev (no __TAURI__), do not acknowledge so the editor remains standalone
+      if (!isTauri()) {
+        try { console.debug('[tauri-host]', 'handshake:init ignored (not Tauri)'); } catch {}
+        return;
+      }
       const ack: HandshakeAckMsg = {
         protocol: PROTOCOL_ID,
         protocolVersion: PROTOCOL_VERSION,
