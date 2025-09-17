@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 
 fn is_bpmn_path(path: &str) -> bool {
   let p = path.to_ascii_lowercase();
@@ -22,25 +22,29 @@ fn emit_open_files(app: &AppHandle, files: Vec<String>) {
     .filter(|f| is_bpmn_path(f))
     .collect();
   if !files.is_empty() {
-    let _ = app.emit_all("open-files", files);
+    let _ = app.emit("open-files", files);
   }
 }
 
 fn main() {
-  let builder = tauri::Builder::default()
+  tauri::Builder::default()
+    // Single instance: forward subsequent invocations' args to the first instance
+    .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+      emit_open_files(&app.app_handle(), argv);
+      if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_focus();
+      }
+    }))
+    // FS plugin for host-side file IO (used from the webview)
+    .plugin(tauri_plugin_fs::init())
+    // Dialog plugin
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
-      // cold start: check initial argv for file paths (Win/Linux)
+      // Cold start: check initial argv for file paths (Win/Linux)
       let args: Vec<String> = std::env::args().skip(1).collect();
-      emit_open_files(&app.handle(), args);
+      emit_open_files(&app.app_handle(), args);
       Ok(())
-    });
-
-  // Build and run with event loop handler to catch macOS Opened events
-  let app = builder
-    .build(tauri::generate_context!())
-    .expect("error while building tauri application");
-
-  app.run(|_app_handle, _event| {
-    // No-op event loop; argv were handled in setup.
-  });
+    })
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
 }

@@ -2,6 +2,8 @@ import { SidecarBridge } from '../../src/sidecar/bridge';
 import { createDomTransport } from '../../src/sidecar/transports/dom';
 import { PROTOCOL_ID, PROTOCOL_VERSION, type HandshakeAckMsg } from '../../src/sidecar/shared/protocol';
 import { listen } from '@tauri-apps/api/event';
+import { open, save } from '@tauri-apps/plugin-dialog';
+import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
 function isTauri(): boolean {
   try { return !!(window as any).__TAURI__; } catch { return false; }
@@ -67,10 +69,7 @@ function isTauri(): boolean {
       if (!(window as any).__TAURI__) return { ok: false };
       const xml = String(payload?.xml ?? '');
       if (!xml) return { ok: false };
-      const [{ save }, { writeTextFile, writeFile }] = await Promise.all([
-        import('@tauri-apps/api/dialog'),
-        import('@tauri-apps/api/fs')
-      ]);
+      // save dialog + write file via Tauri v2 APIs
       const pid = deriveProcessId(xml);
       const suggested = sanitizeFileName((pid || 'diagram') + '.bpmn20.xml');
       const filePath = await save({
@@ -78,11 +77,7 @@ function isTauri(): boolean {
         filters: [ { name: 'BPMN', extensions: ['bpmn', 'xml'] } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.save canceled'); return { ok: false, canceled: true }; }
-      try {
-        await writeTextFile(filePath as string, xml);
-      } catch (e) {
-        await writeFile({ path: filePath as string, contents: xml });
-      }
+      await writeTextFile(filePath as string, xml);
       console.debug('[tauri-host]', 'doc.save ok', { path: filePath });
       return { ok: true, path: filePath };
     } catch (e: any) {
@@ -95,10 +90,7 @@ function isTauri(): boolean {
   host.onRequest('doc.load', async () => {
     try { console.debug('[tauri-host]', 'doc.load request'); } catch {}
     if (!(window as any).__TAURI__) return '';
-    const [{ open }, { readTextFile }] = await Promise.all([
-      import('@tauri-apps/api/dialog'),
-      import('@tauri-apps/api/fs')
-    ]);
+    // open dialog + read file via Tauri v2 APIs
     const sel = await open({
       filters: [ { name: 'BPMN', extensions: ['bpmn', 'xml'] } ],
       multiple: false
@@ -117,21 +109,14 @@ function isTauri(): boolean {
       if (!(window as any).__TAURI__) return { ok: false };
       const svg = String(payload?.svg ?? '');
       if (!svg) return { ok: false };
-      const [{ save }, { writeTextFile, writeFile }] = await Promise.all([
-        import('@tauri-apps/api/dialog'),
-        import('@tauri-apps/api/fs')
-      ]);
+      // save dialog + write file via Tauri v2 APIs
       const suggested = sanitizeFileName(String(payload?.suggestedName || 'diagram.svg'));
       const filePath = await save({
         defaultPath: suggested,
         filters: [ { name: 'SVG', extensions: ['svg'] } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.saveSvg canceled'); return { ok: false, canceled: true }; }
-      try {
-        await writeTextFile(filePath as string, svg);
-      } catch (e) {
-        await writeFile({ path: filePath as string, contents: svg });
-      }
+      await writeTextFile(filePath as string, svg);
       console.debug('[tauri-host]', 'doc.saveSvg ok', { path: filePath });
       return { ok: true, path: filePath };
     } catch (e: any) {
@@ -147,7 +132,7 @@ function isTauri(): boolean {
         try { console.debug('[tauri-host]', 'open-files', payload); } catch {}
         const paths = Array.isArray(payload) ? payload : [payload];
         // Read each file and forward to the component to open in new tab(s)
-        const { readTextFile } = await import('@tauri-apps/api/fs');
+        // readTextFile imported at top
         for (const p of paths) {
           try {
             const xml = await readTextFile(p);
