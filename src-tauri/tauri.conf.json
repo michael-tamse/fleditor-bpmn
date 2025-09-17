@@ -21,6 +21,11 @@
     ]
   },
   "bundle": {
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
     "fileAssociations": [
       {
         "name": "Flowable BPMN 2.0",
@@ -33,7 +38,7 @@
   },
   "plugins": {
     "fs": {
-      "scope": ["**"]
+      "requireLiteralLeadingDot": false
     }
   }
 }

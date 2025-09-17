@@ -2,6 +2,7 @@ import { SidecarBridge } from '../../src/sidecar/bridge';
 import { createDomTransport } from '../../src/sidecar/transports/dom';
 import { PROTOCOL_ID, PROTOCOL_VERSION, type HandshakeAckMsg } from '../../src/sidecar/shared/protocol';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
@@ -61,6 +62,25 @@ function isTauri(): boolean {
       try { console.debug('[tauri-host]', 'handshake:ack sent'); } catch {}
     }
   });
+
+  // Drain any pending file paths buffered on the Rust side (race-safe)
+  (async () => {
+    try {
+      const paths = (await invoke<string[] | undefined>('pending_files_take')) || [];
+      if (paths.length) {
+        for (const p of paths) {
+          try {
+            const xml = await readTextFile(p);
+            const parts = String(p).split(/[\/\\]/);
+            const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
+            await host.request('doc.openExternal', { xml, fileName }, 120000);
+          } catch (e) {
+          }
+        }
+      }
+    } catch (e) {
+    }
+  })();
 
   // Implement doc.save -> native save dialog + write file
   host.onRequest('doc.save', async (payload: any) => {
@@ -126,28 +146,23 @@ function isTauri(): boolean {
   });
 
   // Listen for native "open-files" events from Rust (single-instance + OS integration)
-  if (isTauri()) {
-    try {
-      listen<string[] | string>('open-files', async ({ payload }) => {
-        try { console.debug('[tauri-host]', 'open-files', payload); } catch {}
-        const paths = Array.isArray(payload) ? payload : [payload];
-        // Read each file and forward to the component to open in new tab(s)
-        // readTextFile imported at top
-        for (const p of paths) {
-          try {
-            const xml = await readTextFile(p);
-            const parts = String(p).split(/[/\\]/);
-            const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
-            // Ask the component to open this XML as a new or existing tab
-            await host.request('doc.openExternal', { xml, fileName }, 120000);
-          } catch (e) {
-            try { console.debug('[tauri-host]', 'failed to open file', p, e); } catch {}
-          }
+  try {
+    listen<string[] | string>('open-files', async ({ payload }) => {
+      try { console.debug('[tauri-host]', 'open-files', payload); } catch {}
+      const paths = Array.isArray(payload) ? payload : [payload];
+      for (const p of paths) {
+        try {
+          const xml = await readTextFile(p);
+          const parts = String(p).split(/[/\\]/);
+          const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
+          await host.request('doc.openExternal', { xml, fileName }, 120000);
+        } catch (e) {
+          try { console.debug('[tauri-host]', 'failed to open file', p, e); } catch {}
         }
-      });
-    } catch (e) {
-      try { console.debug('[tauri-host]', 'listen open-files failed', e); } catch {}
-    }
+      }
+    });
+  } catch (e) {
+    try { console.debug('[tauri-host]', 'listen open-files failed', e); } catch {}
   }
 
   // Cleanup on unload

@@ -21,6 +21,7 @@ This document guides agents (and contributors) working on this BPMN editor. It c
 - Preview: `npm run preview`
  - Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI). Dev server must bind `5173`.
 - Tauri Build: `npm run build:tauri`
+ - App Bundle (macOS .app only): `npx @tauri-apps/cli@latest build --bundles app`
 
 Note: Large bundle warnings are expected; not a blocker.
 
@@ -44,12 +45,16 @@ Note: Large bundle warnings are expected; not a blocker.
    - `hosts/browser/index.html`: Host UI (buttons, toggles) + iframe embedding the editor.
    - `hosts/browser/main.ts`: Host logic (handshake ack, ui ops, doc.load/save via downloads).
  - Tauri Host Harness (no UI):
-   - `hosts/tauri/main.ts`: Implements a Sidecar host inside the Tauri WebView. Handles `doc.load`, `doc.save`, `doc.saveSvg` using `@tauri-apps/api` dialog/fs. Responds to `handshake:init` and advertises capabilities.
+   - `hosts/tauri/main.ts`: Tauri v2 host harness. Handles `doc.load`, `doc.save`, `doc.saveSvg` using `@tauri-apps/plugin-dialog` and `@tauri-apps/plugin-fs`. Responds to `handshake:init`, listens for app‑level `open-files` events and forwards files to the component via `doc.openExternal`.
 
 Quick anchors (open in IDE):
 - `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
 - `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save`/`doc.saveSvg` fallbacks.
 - Tabs integration in `src/main.ts` → `DiagramTabState`, `initTabs`, `createDiagramTab`, per‑tab modeler lifecycle, dirty/baseline handling, last‑active persistence.
+ - Tauri integration:
+   - `src-tauri/src/main.rs` → app builder, `tauri-plugin-single-instance`, `tauri-plugin-fs`, `tauri-plugin-dialog`, app‑level `open-files` emission, `pending_files_take` command.
+   - `hosts/tauri/main.ts` → host bridge using plugin‑dialog/fs, drains `pending_files_take`, listens `open-files`, forwards via `doc.openExternal`.
+   - `src/sidecar/shared/protocol.ts` → includes `doc.openExternal` op.
 
 ## Tabs (Multi‑Diagram)
 - Overview: The editor supports multiple BPMN diagrams in parallel via an accessible tab system. Each tab owns a separate `bpmn-js` Modeler and its Properties Panel.
@@ -119,6 +124,7 @@ Quick anchors (open in IDE):
   - `doc.load` (Comp → Host): host returns BPMN XML string.
   - `doc.save` (Comp → Host): host persists XML.
   - `doc.saveSvg` (Comp → Host): host persists SVG.
+  - `doc.openExternal` (Host → Comp): host forwards external file content + filename to open in a tab.
   - `ui.setPropertyPanel` (Host → Comp): show/hide property panel.
   - `ui.setMenubar` (Host → Comp): show/hide editor menubar.
 - Events (Comp → Host): `ui.state` (menubar/propertyPanel flags), `doc.changed` (dirty hint).
@@ -149,8 +155,10 @@ Quick anchors (open in IDE):
 ### Tauri Host Behavior
 - Dev window loads the editor directly (`index.html`); no separate host UI.
 - Host harness (`hosts/tauri/main.ts`) acknowledges `handshake:init` and advertises storage/ui features.
-- File dialogs and persistence use `@tauri-apps/api` (`dialog.open/save`, `fs.readTextFile/writeTextFile`).
-- Icons: requires `src-tauri/icons/icon.png` to exist (a placeholder is present).
+- File dialogs and persistence use Tauri v2 plugins `@tauri-apps/plugin-dialog` and `@tauri-apps/plugin-fs`.
+- File associations: configured in `src-tauri/tauri.conf.json` (`bundle.fileAssociations`). On Windows prefer `.bpmn` (double suffix like `.bpmn20.xml` is effectively `.xml`).
+- macOS: For stability we avoid a custom RunEvent handler; cold‑start via “Öffnen mit …” may start the app without auto‑opening the file. Double‑click while the app is running opens a new tab via the single‑instance plugin. In‑app “Öffnen” always works.
+- Icons: explicit `bundle.icon` points to `src-tauri/icons/icon.icns|icon.ico|icon.png`. Rebuild the .app to update icons.
 - Default file names:
   - XML: `<processId>.bpmn20.xml` extracted from the BPMN `process@id`; falls back to `diagram.bpmn20.xml`.
   - SVG: `<processId>.svg`; falls back to `diagram.svg`.
