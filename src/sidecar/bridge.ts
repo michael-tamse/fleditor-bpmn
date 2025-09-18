@@ -131,12 +131,12 @@ export class SidecarBridge {
 
     if (msg.kind === 'res') {
       const res = msg as ResMsg;
-      // find pending by inReplyTo
-      const pending = Array.from(this.pending.entries()).find(([, p]) => res.inReplyTo && p);
-      if (!pending) return;
-      const [key, p] = pending;
+      // match pending by exact inReplyTo id
+      if (!res.inReplyTo) return;
+      const p = this.pending.get(res.inReplyTo);
+      if (!p) return;
       if (p.timer) clearTimeout(p.timer);
-      this.pending.delete(key);
+      this.pending.delete(res.inReplyTo);
       if (res.ok === false) {
         p.reject(Object.assign(new Error('Request failed'), { op: res.op, payload: res.payload }));
       } else {
@@ -146,4 +146,3 @@ export class SidecarBridge {
     }
   };
 }
-

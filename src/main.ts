@@ -13,14 +13,13 @@ import { SidecarBridge } from './sidecar/bridge';
 import { createDomTransport } from './sidecar/transports/dom';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
 import { Tabs } from './bpmn-tabs/tabs';
-import './bpmn-tabs/tabs.css';
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
 interface DiagramTabState {
   id: string;
-  modeler: BpmnModeler;
+  modeler: any;
   panelEl: HTMLElement;
   layoutEl: HTMLElement;
   canvasEl: HTMLElement;
@@ -246,6 +245,8 @@ function applyPropertyPanelVisibility(state: DiagramTabState) {
   }
 }
 
+function runWithState<T>(state: DiagramTabState, fn: () => Promise<T>): Promise<T>;
+function runWithState<T>(state: DiagramTabState, fn: () => T): T;
 function runWithState<T>(state: DiagramTabState, fn: () => T | Promise<T>): T | Promise<T> {
   const prev = modeler;
   modeler = state.modeler;
@@ -536,7 +537,7 @@ function initTabs() {
     return;
   }
 
-  tabsControl = new Tabs(root, {
+  tabsControl = new Tabs(root as HTMLElement, {
     onCreatePanel(id, panel) {
       const layout = document.createElement('div');
       layout.className = 'diagram-pane';
@@ -1008,6 +1009,25 @@ async function openXmlConsideringDuplicates(xml: string, fileName?: string, sour
     });
     return;
   }
+  // If a different file (different fileName) shares the same process id, offer to open a new tab
+  if (fileName && existing.fileName && sanitizeFileName(fileName) !== sanitizeFileName(existing.fileName)) {
+    const titleMsg = `${pid ? `[${pid}] ` : ''}Gleiches Diagramm (ID) geöffnet`;
+    const ok = await showConfirmDialog(
+      'Ein Diagramm mit gleicher Prozess-ID ist bereits geöffnet. Neues Tab öffnen?',
+      titleMsg,
+      { okLabel: 'Neuer Tab', okVariant: 'primary', cancelLabel: 'Im vorhandenen Tab überschreiben' }
+    );
+    if (ok) {
+      const title = pid || (fileName || `Diagramm ${tabSequence}`);
+      createDiagramTab({
+        title,
+        xml,
+        fileName: sanitizeFileName(fileName),
+        statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen')
+      });
+      return;
+    }
+  }
   // Existing tab detected; if dirty -> warn
   if (existing.dirty) {
     const titleMsg = `${pid ? `[${pid}] ` : ''}Diagramm überschreiben?`;
@@ -1095,7 +1115,7 @@ async function saveSVGWithSidecarFallback() {
       }
       debug('save-svg: host returned not ok', res);
       setStatus('Speichern fehlgeschlagen' + ((res && res.error) ? (': ' + String(res.error)) : ''));
-      return;
+      // fall through to browser download fallback below
     }
   } catch (e) {
     debug('save-svg: host error/no host; fallback', e);
@@ -1157,29 +1177,60 @@ function setPropertyPanelVisible(visible: boolean) {
 }
 
 async function openViaSidecarOrFile() {
-  // Prefer host only after handshake; do not double-open
-  if (hostAvailable() && sidecar) {
-    debug('open: request host doc.load');
-    try {
-      const xml: string = await sidecar.request('doc.load', undefined, 120000);
-      if (typeof xml === 'string' && xml.trim()) {
-        debug('open: host response', { length: xml.length });
-        await openXmlConsideringDuplicates(xml, undefined, 'host');
-        return;
-      } else {
-        debug('open: host canceled or empty response');
-        setStatus('Öffnen abgebrochen');
-        return;
-      }
-    } catch (e) {
-      debug('open: host error after handshake, no fallback', e);
-      setStatus('Öffnen fehlgeschlagen');
+  // Host-first; if not yet connected, wait briefly for handshake instead of falling back
+  const waitForHostConnected = (timeoutMs = 2000) => new Promise<boolean>((resolve) => {
+    const start = Date.now();
+    const tick = () => {
+      if (hostAvailable()) return resolve(true);
+      if (Date.now() - start >= timeoutMs) return resolve(false);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+
+  if (!hostAvailable() || !sidecar) {
+    setStatus('Verbinde mit Host…');
+    const connected = await waitForHostConnected(2000);
+    if (!connected) {
+      // Do not use fallback automatically; keep host-only as requested
+      debug('open: host not connected after wait; aborting without fallback');
+      setStatus('Öffnen abgebrochen (Host nicht verbunden)');
       return;
     }
   }
-  // No host: fallback to local file dialog
-  debug('open: fallback file dialog');
-  triggerOpen();
+
+  // At this point we have a host; request doc.load
+  try {
+    debug('open: request host doc.load');
+    const res: any = await sidecar!.request('doc.load', undefined, 120000);
+    let xml: string | undefined;
+    let fileName: string | undefined;
+    let canceled = false;
+    if (typeof res === 'string') {
+      xml = res;
+    } else if (res && typeof res === 'object') {
+      if (typeof res.xml === 'string') xml = res.xml;
+      if (typeof res.fileName === 'string') fileName = sanitizeFileName(res.fileName);
+      if (res.canceled === true) canceled = true;
+    }
+    if (typeof xml === 'string' && xml.trim()) {
+      debug('open: host response', { length: xml.length, fileName });
+      await openXmlConsideringDuplicates(xml, fileName, 'host');
+      return;
+    }
+    if (canceled) {
+      debug('open: host canceled by user');
+      setStatus('Öffnen abgebrochen');
+      return;
+    }
+    // Host returned nothing useful; avoid fallback per request
+    debug('open: host returned empty/invalid; aborting without fallback');
+    setStatus('Öffnen fehlgeschlagen');
+  } catch (e) {
+    // Avoid fallback; surface error
+    debug('open: host error; aborting without fallback', e);
+    setStatus('Öffnen fehlgeschlagen');
+  }
 }
 
 async function saveXMLWithSidecarFallback() {
@@ -1210,7 +1261,7 @@ async function saveXMLWithSidecarFallback() {
       }
       debug('save: host returned not ok', res);
       setStatus('Speichern fehlgeschlagen' + ((res && res.error) ? (': ' + String(res.error)) : ''));
-      return;
+      // fall through to browser download fallback below
     }
   } catch (e) {
     debug('save: host error/no host; fallback', e);
@@ -1257,7 +1308,7 @@ function initSidecar() {
       if (hostAvailable()) return;
       handshakeAttempts++;
       debug('handshake: attempt', handshakeAttempts);
-      sidecar!.handshake(2000).then((caps) => {
+      sidecar!.handshake(800).then((caps) => {
         sidecarConnected = !!caps;
         if (hostAvailable()) {
           debug('handshake: connected', { host: (sidecar as any).capabilities?.host, features: (sidecar as any).capabilities?.features });
@@ -1266,10 +1317,10 @@ function initSidecar() {
           try { sidecar?.emitEvent('ui.state', { propertyPanel: propertyPanelVisible, menubar: menubarVisible }); } catch {}
           return;
         }
-        if (handshakeAttempts < 5) setTimeout(tryHandshake, 1000);
+        if (handshakeAttempts < 16) setTimeout(tryHandshake, 250);
       }).catch(() => {
         sidecarConnected = false;
-        if (handshakeAttempts < 5) setTimeout(tryHandshake, 1000);
+        if (handshakeAttempts < 16) setTimeout(tryHandshake, 250);
       });
     };
     tryHandshake();

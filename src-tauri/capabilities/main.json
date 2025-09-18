@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/capability.json",
+  "identifier": "main-capabilities",
+  "description": "Allow open/save dialogs, fs read/write and event listening for main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file"
+  ]
+}
+
