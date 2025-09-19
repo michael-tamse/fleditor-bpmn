@@ -22,6 +22,10 @@ This document guides agents (and contributors) working on this BPMN editor. It c
  - Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI). Dev server must bind `5173`.
 - Tauri Build: `npm run build:tauri`
  - App Bundle (macOS .app only): `npx @tauri-apps/cli@latest build --bundles app`
+ - Windows Bundles:
+   - NSIS: `npm run build:win:nsis`
+   - MSI (WiX v3 required): `npm run build:win:msi`
+   - Both: `npm run build:win` (alias to `nsis,msi`)
 
 Note: Large bundle warnings are expected; not a blocker.
 
@@ -178,6 +182,7 @@ Quick anchors (open in IDE):
   - `core:event:allow-listen` (listen to `open-files`), `core:event:default`, `core:default`
   - `dialog:allow-open`, `dialog:allow-save`, `dialog:default`
   - `fs:allow-read-text-file`, `fs:allow-write-text-file`, `fs:default`
+  - NOTE: To avoid `forbidden path` errors when reading user files, the FS permissions are scoped to the user home: `{ path: "$HOME/**" }`. Extend if you need access outside `$HOME` (e.g., add `$DESKTOP/**`, `$DOCUMENTS/**`).
 - If you add host features that use more APIs, extend this file accordingly (prefer least-privilege).
 
 ## Properties Panel Customizations
@@ -370,6 +375,28 @@ In `src/main.ts` we prune unsupported elements from palette, context pad, replac
  - NSURLErrorDomain -999 on save: indicates browser-download fallback was triggered and then aborted by navigation. Ensure host save works (capabilities allow `dialog.save` + fs write) and that Sidecar responses are matched (bridge uses `inReplyTo`).
  - Startup flicker: we load `src/bpmn-tabs/tabs.css` early in `index.html` to prevent FOUC. Keep it in-place if you touch startup.
 - Tauri dev port busy (5173): stop other Vite instances or change port; dev uses `--strictPort`.
+- macOS “Open with …” crash (cold start): On some macOS versions a native Tao/OpenURL path may crash during cold start before JS runs. Workarounds:
+  - Preferred: Launch the app first, then use “Öffnen mit …” (works reliably via single-instance).
+  - The host harness drains files via `pending_files_take` after page load to avoid races; ensure FS capability allows the target path (`$HOME/**`).
+  - Windows is the primary target (95%); this issue may not apply there.
+
+## Open With (OS) — Implementation Notes (2025-09)
+- Host harness (`hosts/tauri/main.ts`):
+  - Sends `handshake:ack` and advertises `doc.openExternal`.
+  - Queues external files (`enqueueExternal`) until the component handshake is seen, then forwards via `doc.openExternal`.
+  - Drains the Rust-side buffer with `invoke('pending_files_take')` on startup; also listens to `open-files` for subsequent files.
+  - Writes short status messages into `#status` (e.g., `pending_files_take: N`, `read …`, `forwarding …`, `component replied: ok`). These are safe for release builds and help debugging without DevTools.
+- Component (`src/main.ts`):
+  - Handles `doc.openExternal` by opening a new tab or importing into existing with duplicate-checks.
+  - Shows `Host: Datei empfangen – <fileName>` in the status bar on receipt.
+- Rust (`src-tauri/src/main.rs`):
+  - Buffers any incoming file paths (argv/single-instance/macOS OpenURL) in `PendingFiles` and exposes them via `pending_files_take`.
+  - On page load we no longer emit `open-files` automatically to avoid races; the JS host drains explicitly.
+  - FS capability is scoped to `$HOME/**` to prevent `forbidden path` errors when reading user files.
+- Windows packaging:
+  - Scripts: `npm run build:win:nsis`, `npm run build:win:msi`, or `npm run build:win` for both.
+  - Prereqs: Rust (MSVC), VS Build Tools, NSIS (for NSIS), WiX v3 (for MSI).
+  - File associations: Prefer `.bpmn`. Double suffixes like `.bpmn20.xml` are effectively `.xml` on Windows.
 
 ---
 This guide is intentionally concise. When in doubt, prefer small, targeted changes and verify with a build. If a task requires broader edits, propose a plan first.
