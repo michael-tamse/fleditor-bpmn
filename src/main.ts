@@ -1295,9 +1295,12 @@ function initSidecar() {
         const xml = String(p?.xml ?? '');
         if (!xml.trim()) return { ok: false };
         const fileName = typeof p?.fileName === 'string' ? sanitizeFileName(p.fileName) : undefined;
+        debug('open-external: received from host', { fileName, size: xml.length });
+        try { setStatus(fileName ? `Host: Datei empfangen – ${fileName}` : 'Host: Datei empfangen'); } catch {}
         await openXmlConsideringDuplicates(xml, fileName, 'host');
         return { ok: true };
       } catch (e: any) {
+        debug('open-external: error', String(e?.message || e));
         return { ok: false, error: String(e?.message || e) } as any;
       }
     });

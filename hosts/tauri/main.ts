@@ -19,6 +19,49 @@ function isTauri(): boolean {
   const transport = createDomTransport();
   const host = new SidecarBridge(transport, 'host');
 
+  // Minimal visible status helper (for release builds without DevTools)
+  function setHostStatus(msg: string) {
+    try {
+      const el = document.querySelector<HTMLElement>('#status');
+      if (el) el.textContent = `[Host] ${msg}`;
+    } catch {}
+  }
+
+  // Queue external open requests until the component is ready (handshake observed)
+  let handshakeSeen = false;
+  const externalOpenQueue: Array<{ xml: string; fileName: string } > = [];
+  let flushing = false;
+  async function flushExternalQueue() {
+    if (!handshakeSeen || flushing) return;
+    try { console.debug('[tauri-host]', 'flushExternalQueue: start', { queued: externalOpenQueue.length }); } catch {}
+    setHostStatus(`flush queue… (${externalOpenQueue.length})`);
+    flushing = true;
+    try {
+      while (externalOpenQueue.length) {
+        const item = externalOpenQueue.shift()!;
+        try {
+          try { console.debug('[tauri-host]', 'flushExternalQueue: forwarding to component', { fileName: item.fileName, size: item.xml.length }); } catch {}
+          setHostStatus(`forwarding ${item.fileName}…`);
+          const res: any = await host.request('doc.openExternal', { xml: item.xml, fileName: item.fileName }, 120000);
+          try { console.debug('[tauri-host]', 'flushExternalQueue: component replied', { ok: !!(res && res.ok) }); } catch {}
+          setHostStatus(`component replied: ${res && res.ok ? 'ok' : 'not ok'}`);
+        } catch {
+          // ignore and continue
+        }
+      }
+    } finally {
+      flushing = false;
+      try { console.debug('[tauri-host]', 'flushExternalQueue: done'); } catch {}
+      setHostStatus('flush done');
+    }
+  }
+  function enqueueExternal(xml: string, fileName: string) {
+    externalOpenQueue.push({ xml, fileName });
+    try { console.debug('[tauri-host]', 'enqueueExternal', { fileName, size: xml.length, queued: externalOpenQueue.length, handshakeSeen }); } catch {}
+    setHostStatus(`queued ${fileName} (${xml.length} bytes)`);
+    flushExternalQueue();
+  }
+
   function deriveProcessId(xml: string): string | null {
     try {
       const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*"([^"]+)"/i.exec(xml);
@@ -76,6 +119,9 @@ function isTauri(): boolean {
         return;
       }
       sendAck();
+      try { console.debug('[tauri-host]', 'handshake:init observed → ready to flush queue'); } catch {}
+      handshakeSeen = true;
+      flushExternalQueue();
     }
   });
 
@@ -83,18 +129,25 @@ function isTauri(): boolean {
   (async () => {
     try {
       const paths = (await invoke<string[] | undefined>('pending_files_take')) || [];
+      try { console.debug('[tauri-host]', 'pending_files_take', { count: paths.length, paths }); } catch {}
+      setHostStatus(`pending_files_take: ${paths.length}`);
       if (paths.length) {
         for (const p of paths) {
           try {
             const xml = await readTextFile(p);
             const parts = String(p).split(/[\/\\]/);
             const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
-            await host.request('doc.openExternal', { xml, fileName }, 120000);
+            try { console.debug('[tauri-host]', 'pending_files_take: read file', { path: p, fileName, size: xml.length }); } catch {}
+            setHostStatus(`read ${fileName} (${xml.length} bytes)`);
+            enqueueExternal(xml, fileName);
           } catch (e) {
+            try { console.debug('[tauri-host]', 'pending_files_take: read failed', { path: p, error: String((e as any)?.message || e) }); } catch {}
+            setHostStatus(`failed to read ${String(p)}: ${String((e as any)?.message || e)}`);
           }
         }
       }
     } catch (e) {
+      try { console.debug('[tauri-host]', 'pending_files_take: invoke failed', e); } catch {}
     }
   })();
 
@@ -176,20 +229,27 @@ function isTauri(): boolean {
     listen<string[] | string>('open-files', async ({ payload }) => {
       try { console.debug('[tauri-host]', 'open-files', payload); } catch {}
       const paths = Array.isArray(payload) ? payload : [payload];
+      setHostStatus(`open-files event: ${paths.length}`);
       for (const p of paths) {
         try {
           const xml = await readTextFile(p);
           const parts = String(p).split(/[/\\]/);
           const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
-          await host.request('doc.openExternal', { xml, fileName }, 120000);
+          try { console.debug('[tauri-host]', 'open-files: read file', { path: p, fileName, size: xml.length }); } catch {}
+          setHostStatus(`read ${fileName} (${xml.length} bytes)`);
+          enqueueExternal(xml, fileName);
         } catch (e) {
           try { console.debug('[tauri-host]', 'failed to open file', p, e); } catch {}
+          setHostStatus(`failed to read ${String(p)}: ${String((e as any)?.message || e)}`);
         }
       }
     }).catch((e) => { try { console.debug('[tauri-host]', 'listen open-files failed (permissions?)', e); } catch {} });
   } catch (e) {
     try { console.debug('[tauri-host]', 'listen open-files threw sync', e); } catch {}
   }
+
+  // Safety: if handshake somehow never arrives, try a delayed flush to not drop user-initiated opens
+  setTimeout(() => { try { console.debug('[tauri-host]', 'safety flush timer fired', { handshakeSeen, queued: externalOpenQueue.length }); } catch {} if (!handshakeSeen) flushExternalQueue(); }, 2000);
 
   // Cleanup on unload
   window.addEventListener('unload', () => { try { unlisten && unlisten(); } catch {} host.dispose(); });
