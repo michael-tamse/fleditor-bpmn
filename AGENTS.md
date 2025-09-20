@@ -32,7 +32,9 @@ Note: Large bundle warnings are expected; not a blocker.
 ## Key Files
 - `src/main.ts`: App bootstrap, canvas + properties panel wiring, palette/context pad/replace menu filtering, file I/O, zoom. Also hosts import/export helpers (icon/DI fixes, XML rewrites) and small migrations/defaults.
 - `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types) including Event/Mapping/Variable Aggregation/Start Correlation types.
-- `src/flowable-properties-provider.ts`: Custom properties provider logic. Adds/adjusts entries and groups and integrates with the default provider.
+- `src/flowable-properties-provider.ts`: Slim provider wrapper. Imports all contributors and runs them via `compose(...)`; no element-specific logic remains here.
+- `src/properties/helpers/entries.ts`: Central export surface for all properties-panel entry components. Contributors import from here for consistency.
+- `src/properties/contributors/`: Directory of focused contributor modules (service-task, call-activity, message events, error events, business-rule task, multi-instance, variable aggregations, etc.). Each contributor is pure and only mutates provided groups based on guard checks.
 - `styles.css`, `index.html`: Base UI shell.
 - Tabs (multi‑diagram support):
   - `src/bpmn-tabs/tabs.ts`: Accessible tabs manager (add/activate/close, overflow scroll buttons, keyboard support, context menu, dirty marker).
@@ -53,7 +55,16 @@ Note: Large bundle warnings are expected; not a blocker.
    - Capabilities (permissions) are defined via files in `src-tauri/capabilities/` (see “Tauri v2 Capabilities”).
 
 Quick anchors (open in IDE):
-- `src/flowable-properties-provider.ts` → `FlowablePropertiesProvider`, `createExecutionGroup`, Send/Receive/Start/ICE/Boundary sections, Error Start/Boundary sections, BusinessRuleTask (DMN) entries, Variable Aggregations.
+- `src/flowable-properties-provider.ts` → contains only the `FlowablePropertiesProvider` shell that logs, runs contributors, and returns the mutated `groups` array.
+- `src/properties/contributors/` → modular logic for all Flowable properties (execution flags, call activity, send/receive/message events, errors, business rule task, multi-instance, variable aggregations, etc.).
+- `src/properties/helpers/entries.ts` → shared re-exports for entry components; use this file when adding a new contributor.
+- `src/properties/entries/` → concrete UI entry implementations (business-rule task, multi-instance, variable aggregations, event registry, error, etc.).
+
+### Properties Architecture
+- Provider serves as composition shell; all behaviour stems from contributors listed in the compose call (keep the order stable when inserting new ones).
+- Contributors must stay pure: no `useService` calls, only guard checks + group/entry mutations.
+- UI components live in `src/properties/entries/` and are exported through `helpers/entries.ts` so contributors share the same import path.
+- Helper modules (`helpers/dmn.ts`, `helpers/flowable-events.ts`, `helpers/variable-aggregations.ts`, etc.) encapsulate moddle access/manipulation for reuse across entries/contributors.
 - `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save`/`doc.saveSvg` fallbacks.
 - Tabs integration in `src/main.ts` → `DiagramTabState`, `initTabs`, `createDiagramTab`, per‑tab modeler lifecycle, dirty/baseline handling, last‑active persistence.
  - Tauri integration:
