@@ -60,7 +60,9 @@ fn main() {
       if let Some(win) = app.get_webview_window("main") { let _ = win.set_focus(); }
       else {
         let state = app.app_handle().state::<PendingFiles>();
-        { if let Ok(mut guard) = state.0.lock() { guard.extend(files); }; }
+        if let Ok(mut guard) = state.0.lock() {
+          guard.extend(files);
+        }
         println!("[tauri-rust] single_instance: buffered files for later (webview not ready)");
       }
     }))
@@ -84,7 +86,9 @@ fn main() {
       if !files.is_empty() {
         // Cold start: always buffer and emit on on_page_load to avoid race before webview listener attaches
         let state = app.app_handle().state::<PendingFiles>();
-        { if let Ok(mut guard) = state.0.lock() { guard.extend(files.clone()); }; }
+        if let Ok(mut guard) = state.0.lock() {
+          guard.extend(files.clone());
+        }
         println!("[tauri-rust] setup: buffering files for page load ({} file(s))", files.len());
       }
       Ok(())
@@ -104,7 +108,9 @@ fn main() {
         println!("[tauri-rust] run(): processed files = {:?}", files);
         if !files.is_empty() {
           let state = app_handle.state::<PendingFiles>();
-          { if let Ok(mut guard) = state.0.lock() { guard.extend(files.clone()); } }
+          if let Ok(mut guard) = state.0.lock() {
+            guard.extend(files.clone());
+          }
           let _ = app_handle.emit("open-files", files);
         }
       }
