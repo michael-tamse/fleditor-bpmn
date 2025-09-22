@@ -158,15 +158,24 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
   const maybeRestoreActiveTab = (window as any).maybeRestoreActiveTab;
   const updateDmnTabTitle = (window as any).updateDmnTabTitle;
   const setStatus = (window as any).setStatus;
-  const initialXml = (window as any).initialXml || '';
 
   if (updateStateTitle) updateStateTitle(state, init.title);
   if (typeof init.fileName === 'string') state.fileName = init.fileName;
   if (tabsControl?.getActiveId() === state.id && persistActiveTab) persistActiveTab(state);
 
   let xml = init.xml;
+  console.log('[Debug] bootstrapState - init.xml:', typeof init.xml, init.xml ? 'HAS_VALUE' : 'EMPTY/NULL');
+  console.log('[Debug] bootstrapState - init.xml content:', init.xml);
+
+  // Fix: if init.xml is an object, it might be a DiagramInit or similar, extract the actual XML
+  if (typeof xml === 'object' && xml !== null) {
+    console.log('[Debug] init.xml is object, trying to extract XML string');
+    xml = null; // Force fallback to initial XML
+  }
+
   if (!xml) {
-    xml = initialXml;
+    xml = state.kind === 'dmn' ? initialDmnXml : initialXml;
+    console.log('[Debug] bootstrapState - using fallback XML for kind:', state.kind, typeof xml, xml ? xml.substring(0, 50) + '...' : 'EMPTY/NULL');
   }
 
   let prepared: string;
@@ -179,6 +188,8 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
     prepared = init.xml ? applyImportTransformations(xml) : xml;
     inferredTitle = deriveProcessId(prepared);
   }
+
+  console.log('[Debug] bootstrapState - prepared XML:', typeof prepared, prepared && typeof prepared === 'string' ? prepared.substring(0, 100) + '...' : 'EMPTY/NULL/NOT_STRING');
 
   if (inferredTitle && updateStateTitle) updateStateTitle(state, inferredTitle);
 
@@ -198,7 +209,14 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
 
     } else {
       if (runWithState) {
-        await runWithState(state, () => state.modeler.importXML(prepared));
+        console.log('[Debug] About to call importXML with:', typeof prepared, prepared?.length || 0, 'chars');
+        try {
+          await runWithState(state, () => state.modeler.importXML(prepared));
+        } catch (importError) {
+          console.error('[Debug] importXML failed:', importError);
+          console.error('[Debug] XML that failed:', prepared);
+          throw importError;
+        }
         runWithState(state, () => {
           try { state.modeler.get('canvas').zoom('fit-viewport', 'auto'); } catch {}
         });
@@ -231,7 +249,7 @@ export function setupModelerForState(state: DiagramTabState) {
           panelSvc.attachTo(state.propertiesEl);
         }
       } catch {}
-      customizeProviders();
+      customizeProviders(state.modeler);
     });
   }
   bindModelerEvents(state);
@@ -239,12 +257,15 @@ export function setupModelerForState(state: DiagramTabState) {
   applyPropertyPanelVisibility(state);
 }
 
-export function customizeProviders() {
+export function customizeProviders(currentModeler?: any) {
   try {
-    const injector = modeler.get('injector');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const injector = m.get('injector');
 
     const paletteProvider = injector.get('paletteProvider', false);
-    const palette = modeler.get('palette', false);
+    const palette = m.get('palette', false);
     if (paletteProvider && typeof paletteProvider.getPaletteEntries === 'function') {
       const originalGet = paletteProvider.getPaletteEntries.bind(paletteProvider);
       paletteProvider.getPaletteEntries = function () {
