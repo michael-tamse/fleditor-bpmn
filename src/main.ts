@@ -398,38 +398,88 @@ function bindModelerEvents(state: DiagramTabState) {
 }
 
 function bindDmnTabEvents(state: DiagramTabState) {
-  // DMN-js Standard-Events wie im Original
+  // Variable für Clean-up Funktion des aktiven Viewers
+  let unbindActiveViewer = () => {};
+
+  function bindActiveViewer() {
+    // Alte Listener entfernen
+    unbindActiveViewer();
+
+    const activeViewer = state.modeler.getActiveViewer();
+    if (!activeViewer) return;
+
+    try {
+      const eventBus = activeViewer.get('eventBus');
+      const commandStack = activeViewer.get('commandStack', false);
+
+      // Debounced Change Handler
+      const markDirty = debounce(() => {
+        console.log('DMN Event: Change detected in active viewer');
+        scheduleDirtyCheckDmn(state);
+      }, 100);
+
+      // Hauptevent für Modelländerungen (empfohlener Weg)
+      eventBus.on('elements.changed', markDirty);
+
+      // Zusätzlicher Hook für Command Stack Änderungen
+      eventBus.on('commandStack.changed', markDirty);
+
+      // Clean-up Funktion für View-Wechsel
+      unbindActiveViewer = () => {
+        eventBus.off('elements.changed', markDirty);
+        eventBus.off('commandStack.changed', markDirty);
+      };
+
+      console.log('DMN Event: Bound to active viewer:', activeViewer.type || 'unknown');
+    } catch (e) {
+      console.warn('Failed to bind to active DMN viewer:', e);
+    }
+  }
+
   try {
+    // Event für View-Wechsel (DRD, Decision Table, Literal Expression)
     state.modeler.on('views.changed', () => {
-      console.log('DMN Event: views.changed fired');
-      scheduleDirtyCheckDmn(state);
+      console.log('DMN Event: views.changed fired - rebinding to new active viewer');
+      bindActiveViewer();
       updateDmnTabTitle(state);
     });
 
+    // Legacy events für Kompatibilität
     state.modeler.on('view.contentChanged', () => {
       console.log('DMN Event: view.contentChanged fired');
       scheduleDirtyCheckDmn(state);
       updateDmnTabTitle(state);
     });
 
-    // Listen for element property changes (like decision ID changes)
-    state.modeler.on('element.changed', () => {
-      console.log('DMN Event: element.changed fired');
+    // Initial binding nach Import
+    state.modeler.on('import.done', () => {
+      console.log('DMN Event: import.done - initial binding');
+      bindActiveViewer();
       updateDmnTabTitle(state);
     });
 
-    // Additional events to try
-    state.modeler.on('commandStack.changed', () => {
-      console.log('DMN Event: commandStack.changed fired');
+    // Initial tab title update
+    setTimeout(() => {
+      bindActiveViewer();
       updateDmnTabTitle(state);
-    });
+    }, 100);
 
-    // Initial tab title update (with delay to ensure data is loaded)
-    console.log('DMN Tab Title: Setting up initial update');
-    setTimeout(() => updateDmnTabTitle(state), 100);
   } catch (e) {
     console.warn('Failed to bind DMN events:', e);
   }
+}
+
+// Debounce Helper (falls nicht bereits verfügbar)
+function debounce(func: Function, wait: number) {
+  let timeout: any;
+  return function executedFunction(...args: any[]) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
 }
 
 function updateDmnTabTitle(state: DiagramTabState) {
@@ -1272,47 +1322,59 @@ function createInitialDmnXmlWithDecisionId(decisionId: string): string {
 }
 
 async function openXmlConsideringDuplicates(xml: string, fileName?: string, source: 'host' | 'file' | 'unknown' = 'unknown') {
-  const pid = deriveProcessId(xml);
-  const existing = pid ? findTabByProcessId(pid) : null;
+  // Detect diagram type first
+  const diagramType = detectDiagramType(xml);
+
+  // Get appropriate ID based on diagram type
+  let id: string | null;
+  if (diagramType === 'dmn') {
+    id = deriveDmnId(xml);
+  } else {
+    id = deriveProcessId(xml);
+  }
+
+  const existing = id ? findTabByProcessId(id) : null;
   if (!existing) {
-    const title = pid || (fileName || `Diagramm ${tabSequence}`);
+    const title = id || (fileName || `Diagramm ${tabSequence}`);
     createDiagramTab({
       title,
       xml,
       fileName: fileName ? sanitizeFileName(fileName) : undefined,
-      statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen')
+      statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen'),
+      kind: diagramType
     });
     return;
   }
   // If a different file (different fileName) shares the same process id, offer to open a new tab
   if (fileName && existing.fileName && sanitizeFileName(fileName) !== sanitizeFileName(existing.fileName)) {
-    const titleMsg = `${pid ? `[${pid}] ` : ''}Gleiches Diagramm (ID) geöffnet`;
+    const titleMsg = `${id ? `[${id}] ` : ''}Gleiches Diagramm (ID) geöffnet`;
     const ok = await showConfirmDialog(
       'Ein Diagramm mit gleicher Prozess-ID ist bereits geöffnet. Neues Tab öffnen?',
       titleMsg,
       { okLabel: 'Neuer Tab', okVariant: 'primary', cancelLabel: 'Im vorhandenen Tab überschreiben' }
     );
     if (ok) {
-      const title = pid || (fileName || `Diagramm ${tabSequence}`);
+      const title = id || (fileName || `Diagramm ${tabSequence}`);
       createDiagramTab({
         title,
         xml,
         fileName: sanitizeFileName(fileName),
-        statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen')
+        statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen'),
+        kind: diagramType
       });
       return;
     }
   }
   // Existing tab detected; if dirty -> warn
   if (existing.dirty) {
-    const titleMsg = `${pid ? `[${pid}] ` : ''}Diagramm überschreiben?`;
+    const titleMsg = `${id ? `[${id}] ` : ''}Diagramm überschreiben?`;
     const ok = await showConfirmDialog('Es gibt ungespeicherte Änderungen. Änderungen überschreiben?', titleMsg, { okLabel: 'Ja' });
     if (!ok) { setStatus('Öffnen abgebrochen'); tabsControl?.activate(existing.id); return; }
   }
   // Import into existing tab and activate it
   tabsControl?.activate(existing.id);
   await bootstrapState(existing, {
-    title: pid || existing.title || 'Diagramm',
+    title: id || existing.title || 'Diagramm',
     xml,
     fileName: fileName ? sanitizeFileName(fileName) : existing.fileName,
     statusMessage: source === 'host' ? 'Aus Host geladen' : (fileName ? `Geladen: ${fileName}` : 'Datei geladen'),
@@ -1324,6 +1386,18 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?\"<>|\n\r]+/g, '_');
 }
 
+function detectDiagramType(xml: string): 'bpmn' | 'dmn' {
+  // Check for DMN namespace and decision elements
+  if (xml.includes('dmn:definitions') ||
+      xml.includes('<definitions') && xml.includes('dmn') ||
+      xml.includes('<decision') ||
+      xml.includes('dmn:decision')) {
+    return 'dmn';
+  }
+  // Default to BPMN
+  return 'bpmn';
+}
+
 async function saveXML() {
   const state = getActiveState();
   if (!state) return;
@@ -1331,8 +1405,19 @@ async function saveXML() {
     const withFlowableHeader = await prepareXmlForExport();
     // Browser default: trigger download (or use host via saveXMLWithSidecarFallback)
     debug('save: browser download fallback');
-    const pid = deriveProcessId(withFlowableHeader);
-    const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
+
+    // Use appropriate ID derivation based on diagram type
+    let id: string | null;
+    let extension: string;
+    if (state.kind === 'dmn') {
+      id = deriveDmnId(withFlowableHeader);
+      extension = '.dmn';
+    } else {
+      id = deriveProcessId(withFlowableHeader);
+      extension = '.bpmn20.xml';
+    }
+
+    const name = sanitizeFileName((id || 'diagram') + extension);
     download(name, withFlowableHeader, 'application/xml');
     state.fileName = name;
     persistActiveTab(state);
@@ -1537,7 +1622,7 @@ async function saveXMLWithSidecarFallback() {
     const xml = await prepareXmlForExport();
     if (hostAvailable() && sidecar) {
       debug('save: request host doc.save', { size: xml.length });
-      const res: any = await sidecar.request('doc.save', { xml }, 120000);
+      const res: any = await sidecar.request('doc.save', { xml, diagramType: state.kind }, 120000);
       if (res && res.ok) {
         debug('save: host ok', { path: (res && res.path) || undefined });
         const path = typeof res.path === 'string' ? res.path : undefined;

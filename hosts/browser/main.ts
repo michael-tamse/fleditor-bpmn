@@ -36,6 +36,33 @@ function deriveProcessId(xml: string): string | null {
     return m ? m[2] : null;
   } catch { return null; }
 }
+
+function deriveDmnId(xml: string): string | null {
+  try {
+    if (!xml || typeof xml !== 'string') {
+      return null;
+    }
+    // Try multiple patterns for decision ID
+    const patterns = [
+      /<([\w-]+:)?decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+      /<([\w-]+:)?decision\b[^>]*\bid\s*=\s*'([^']+)'/i,
+      /<decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+      /<dmn:decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+      /<([\w-]+:)?decision\b[^>]*\bname\s*=\s*"([^"]+)"/i,
+      /<([\w-]+:)?definitions\b[^>]*\bid\s*=\s*"([^"]+)"/i
+    ];
+    for (const pattern of patterns) {
+      const match = pattern.exec(xml);
+      if (match) {
+        return match[2] || match[1];
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|\n\r]+/g, '_');
 }
@@ -85,8 +112,19 @@ function setupBridge() {
   bridge.onRequest('doc.save', async (p: any) => {
     const xml = String(p?.xml || '');
     if (xml) {
-      const pid = deriveProcessId(xml);
-      const name = sanitizeFileName(((pid || 'diagram') + '.bpmn20.xml'));
+      const diagramType = p?.diagramType || 'bpmn';
+      let id: string | null;
+      let extension: string;
+
+      if (diagramType === 'dmn') {
+        id = deriveDmnId(xml);
+        extension = '.dmn';
+      } else {
+        id = deriveProcessId(xml);
+        extension = '.bpmn20.xml';
+      }
+
+      const name = sanitizeFileName((id || 'diagram') + extension);
       download(name, xml, 'application/xml');
     }
     return { ok: true };
