@@ -1,9 +1,16 @@
 import BpmnModeler from 'bpmn-js/lib/Modeler';
-// CSS (bundled)
+// CSS (bundled) - BPMN und DMN global verfügbar
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-codes.css';
+import 'dmn-js/dist/assets/diagram-js.css';
+import 'dmn-js/dist/assets/dmn-js-shared.css';
+import 'dmn-js/dist/assets/dmn-font/css/dmn-embedded.css';
+import 'dmn-js/dist/assets/dmn-js-drd.css';
+import 'dmn-js/dist/assets/dmn-js-decision-table.css';
+import 'dmn-js/dist/assets/dmn-js-decision-table-controls.css';
+import 'dmn-js/dist/assets/dmn-js-literal-expression.css';
 import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js-properties-panel';
 
@@ -11,6 +18,7 @@ import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
 import { SidecarBridge } from './sidecar/bridge';
 import { createDomTransport } from './sidecar/transports/dom';
+import DmnJS from 'dmn-js/lib/Modeler';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
 import { Tabs } from './bpmn-tabs/tabs';
 
@@ -30,6 +38,7 @@ interface DiagramTabState {
   baselineHash?: number;
   dirtyTimer?: any;
   isImporting: boolean;
+  diagramType: 'bpmn' | 'dmn';
 }
 
 interface DiagramInit {
@@ -38,6 +47,7 @@ interface DiagramInit {
   fileName?: string;
   statusMessage?: string;
   activate?: boolean;
+  diagramType?: 'bpmn' | 'dmn';
 }
 
 const tabStates = new Map<string, DiagramTabState>();
@@ -294,13 +304,36 @@ async function updateBaseline(state: DiagramTabState) {
   try {
     const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
     state.baselineHash = hashString(xml);
-    const derivedTitle = deriveProcessId(xml);
+
+    let derivedTitle: string | null;
+    if (state.diagramType === 'dmn') {
+      derivedTitle = deriveDecisionId(xml);
+    } else {
+      derivedTitle = deriveProcessId(xml);
+    }
+
     if (derivedTitle) updateStateTitle(state, derivedTitle);
     setDirtyState(state, false);
   } catch {}
 }
 
 function scheduleDirtyCheck(state: DiagramTabState) {
+  if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
+  state.dirtyTimer = setTimeout(async () => {
+    try {
+      const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
+      if (typeof state.baselineHash === 'number') {
+        setDirtyState(state, hashString(xml) !== state.baselineHash);
+      } else {
+        setDirtyState(state, true);
+      }
+    } catch {
+      setDirtyState(state, true);
+    }
+  }, 300);
+}
+
+function scheduleDirtyCheckDmn(state: DiagramTabState) {
   if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
   state.dirtyTimer = setTimeout(async () => {
     try {
@@ -342,6 +375,21 @@ function bindModelerEvents(state: DiagramTabState) {
       ensureCallActivityDefaults();
     });
   });
+}
+
+function bindDmnTabEvents(state: DiagramTabState) {
+  // DMN-js Standard-Events wie im Original
+  try {
+    state.modeler.on('views.changed', () => {
+      scheduleDirtyCheckDmn(state);
+    });
+
+    state.modeler.on('view.contentChanged', () => {
+      scheduleDirtyCheckDmn(state);
+    });
+  } catch (e) {
+    console.warn('Failed to bind DMN events:', e);
+  }
 }
 
 function handleShapeAdded(state: DiagramTabState, e: any) {
@@ -485,15 +533,38 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
     xml = initialXml;
   }
 
-  const prepared = init.xml ? normalizeErrorRefOnImport(expandSubProcessShapesInDI(prefixVariableChildrenForImport(xml))) : xml;
-  const inferredTitle = deriveProcessId(prepared);
+  let prepared: string;
+  let inferredTitle: string | null;
+
+  if (state.diagramType === 'dmn') {
+    prepared = xml;
+    inferredTitle = deriveDecisionId(prepared);
+  } else {
+    prepared = init.xml ? normalizeErrorRefOnImport(expandSubProcessShapesInDI(prefixVariableChildrenForImport(xml))) : xml;
+    inferredTitle = deriveProcessId(prepared);
+  }
+
   if (inferredTitle) updateStateTitle(state, inferredTitle);
 
   try {
-    await runWithState(state, () => state.modeler.importXML(prepared));
-    runWithState(state, () => {
-      try { state.modeler.get('canvas').zoom('fit-viewport', 'auto'); } catch {}
-    });
+    if (state.diagramType === 'dmn') {
+      // DMN Standard-Import
+      await runWithState(state, () => state.modeler.importXML(prepared));
+
+      // Automatisch zur Decision Table View wechseln
+      const views = state.modeler.getViews();
+      if (views && views.length > 0) {
+        const decisionTableView = views.find((v: any) => v.type === 'decisionTable');
+        if (decisionTableView) {
+          await state.modeler.open(decisionTableView);
+        }
+      }
+    } else {
+      await runWithState(state, () => state.modeler.importXML(prepared));
+      runWithState(state, () => {
+        try { state.modeler.get('canvas').zoom('fit-viewport', 'auto'); } catch {}
+      });
+    }
     await updateBaseline(state);
     if (init.statusMessage && tabsControl?.getActiveId() === state.id) setStatus(init.statusMessage);
   } catch (err) {
@@ -506,6 +577,14 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
 }
 
 function setupModelerForState(state: DiagramTabState) {
+  if (state.diagramType === 'dmn') {
+    // DMN Web Component handles its own events
+    bindDmnTabEvents(state);
+    bindDragAndDrop(state);
+    return;
+  }
+
+  // BPMN-specific setup
   runWithState(state, () => {
     try {
       const panelSvc = state.modeler.get('propertiesPanel', false);
@@ -542,9 +621,11 @@ function initTabs() {
       const layout = document.createElement('div');
       layout.className = 'diagram-pane';
 
+      const diagramType = pendingTabInits.get(id)?.diagramType || 'bpmn';
+
       const canvas = document.createElement('div');
-      canvas.className = 'canvas';
-      canvas.setAttribute('aria-label', 'BPMN Arbeitsfläche');
+      canvas.className = diagramType === 'dmn' ? 'canvas dmn-canvas' : 'canvas';
+      canvas.setAttribute('aria-label', diagramType === 'dmn' ? 'DMN Arbeitsfläche' : 'BPMN Arbeitsfläche');
 
       const props = document.createElement('aside');
       props.className = 'properties';
@@ -553,16 +634,25 @@ function initTabs() {
       layout.append(canvas, props);
       panel.appendChild(layout);
 
-      const instance = new BpmnModeler({
-        container: canvas,
-        propertiesPanel: { parent: props },
-        additionalModules: [
-          BpmnPropertiesPanelModule,
-          BpmnPropertiesProviderModule,
-          FlowablePropertiesProviderModule
-        ],
-        moddleExtensions: { flowable: flowableModdle }
-      });
+      let instance: any;
+      if (diagramType === 'dmn') {
+        // Create DMN instance direkt wie BPMN - ohne Web Component
+        instance = new DmnJS({
+          container: canvas,
+          keyboard: { bindTo: window }
+        });
+      } else {
+        instance = new BpmnModeler({
+          container: canvas,
+          propertiesPanel: { parent: props },
+          additionalModules: [
+            BpmnPropertiesPanelModule,
+            BpmnPropertiesProviderModule,
+            FlowablePropertiesProviderModule
+          ],
+          moddleExtensions: { flowable: flowableModdle }
+        });
+      }
 
       const state: DiagramTabState = {
         id,
@@ -573,7 +663,8 @@ function initTabs() {
         propertiesEl: props,
         title: '',
         dirty: false,
-        isImporting: false
+        isImporting: false,
+        diagramType
       };
 
       tabStates.set(id, state);
@@ -581,9 +672,10 @@ function initTabs() {
       updateEmptyStateVisibility();
 
       const init = pendingTabInits.get(id) ?? {
-        title: `Diagramm ${tabSequence}`,
-        xml: initialXml,
-        statusMessage: 'Neues Diagramm geladen'
+        title: diagramType === 'dmn' ? `Entscheidung ${tabSequence}` : `Diagramm ${tabSequence}`,
+        xml: diagramType === 'dmn' ? initialDmnXml : initialXml,
+        statusMessage: diagramType === 'dmn' ? 'Neue DMN Entscheidungstabelle geladen' : 'Neues Diagramm geladen',
+        diagramType
       };
       pendingTabInits.delete(id);
 
@@ -593,6 +685,7 @@ function initTabs() {
     },
     onActivate(id) {
       setActiveTab(id ?? null);
+      // DMN wird jetzt wie BPMN behandelt - keine spezielle Attach/Detach-Logik nötig
     },
     async onClose(id) {
       const state = tabStates.get(id);
@@ -608,7 +701,12 @@ function initTabs() {
       const state = tabStates.get(id);
       if (!state) return;
       if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
-      try { state.modeler.destroy(); } catch {}
+
+      // DMN cleanup wie BPMN - keine spezielle Logik nötig
+
+      try {
+        state.modeler.destroy();
+      } catch {}
       tabStates.delete(id);
       if (activeTabState && activeTabState.id === id) {
         activeTabState = null;
@@ -616,20 +714,32 @@ function initTabs() {
       }
       updateEmptyStateVisibility();
     },
-    onAddRequest() {
-      createNewDiagram();
+    onAddRequest(diagramType: 'bpmn' | 'dmn') {
+      createNewDiagram(diagramType);
     }
   });
 }
 
-function createNewDiagram() {
-  const nextPid = computeNextProcessId();
-  const xml = createInitialXmlWithProcessId(nextPid);
-  createDiagramTab({
-    title: nextPid,
-    xml,
-    statusMessage: 'Neues Diagramm geladen'
-  });
+function createNewDiagram(diagramType: 'bpmn' | 'dmn' = 'bpmn') {
+  if (diagramType === 'dmn') {
+    const decisionId = `Decision_${tabSequence}`;
+    const xml = createInitialDmnXmlWithDecisionId(decisionId);
+    createDiagramTab({
+      title: decisionId,
+      xml,
+      statusMessage: 'Neue DMN Entscheidungstabelle geladen',
+      diagramType: 'dmn'
+    });
+  } else {
+    const nextPid = computeNextProcessId();
+    const xml = createInitialXmlWithProcessId(nextPid);
+    createDiagramTab({
+      title: nextPid,
+      xml,
+      statusMessage: 'Neues Diagramm geladen',
+      diagramType: 'bpmn'
+    });
+  }
 }
 
 // UI customizations from existing app (palette/context pad/replacement)
@@ -881,6 +991,35 @@ const initialXml = `<?xml version="1.0" encoding="UTF-8"?>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
+const initialDmnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC/" id="Definitions_1" name="DMN" namespace="http://camunda.org/schema/1.0/dmn">
+  <decision id="Decision_1" name="Decision 1">
+    <decisionTable id="DecisionTable_1">
+      <input id="Input_1" label="Input">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text>input</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Output" typeRef="string" />
+      <rule id="DecisionRule_1">
+        <inputEntry id="UnaryTests_1">
+          <text>""</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1">
+          <text>""</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_1">
+      <dmndi:DMNShape id="DMNShape_1" dmnElementRef="Decision_1">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>`;
+
 async function openFileAsTab(file: File) {
   if (!file) return;
   try {
@@ -930,6 +1069,13 @@ function deriveProcessId(xml: string): string | null {
   try {
     const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*\"([^\"]+)\"/i.exec(xml);
     return m ? m[2] : null;
+  } catch { return null; }
+}
+
+function deriveDecisionId(xml: string): string | null {
+  try {
+    const m = /<decision\b[^>]*\bid\s*=\s*\"([^\"]+)\"/i.exec(xml);
+    return m ? m[1] : null;
   } catch { return null; }
 }
 
@@ -993,6 +1139,17 @@ function createInitialXmlWithProcessId(pid: string): string {
     return xml;
   } catch {
     return initialXml;
+  }
+}
+
+function createInitialDmnXmlWithDecisionId(decisionId: string): string {
+  try {
+    let xml = initialDmnXml;
+    xml = xml.replace(/(<decision\s+id=")Decision_\d+("[^>]*>)/, `$1${decisionId}$2`);
+    xml = xml.replace(/(dmnElementRef=")Decision_\d+(")/, `$1${decisionId}$2`);
+    return xml;
+  } catch {
+    return initialDmnXml;
   }
 }
 

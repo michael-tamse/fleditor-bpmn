@@ -38,7 +38,13 @@
           <button class="scroll-btn left" aria-hidden="true" tabindex="-1" title="Nach links scrollen">◀</button>
           <div class="tablist" role="tablist" aria-label="Geöffnete Diagramme"></div>
           <button class="scroll-btn right" aria-hidden="true" tabindex="-1" title="Nach rechts scrollen">▶</button>
-          <button class="add-tab" type="button" title="Neues Diagramm" aria-label="Neuen Tab anlegen">＋</button>
+          <div class="add-tab-container">
+            <button class="add-tab" type="button" title="Neues Diagramm" aria-label="Neuen Tab anlegen">＋</button>
+            <div class="add-tab-menu">
+              <button type="button" data-diagram-type="bpmn">BPMN Diagramm</button>
+              <button type="button" data-diagram-type="dmn">DMN Entscheidungstabelle</button>
+            </div>
+          </div>
         </div>
         <div class="panels">
           <div id="emptyState" class="empty-state" aria-live="polite">
