@@ -11,6 +11,44 @@ export function setModeler(m: any) {
   modeler = m;
 }
 
+export function syncDmnDecisionIdWithName(state: DiagramTabState) {
+  if (!state.modeler) return;
+
+  try {
+    const activeView = state.modeler.getActiveView();
+    if (!activeView || !activeView.element) return;
+
+    const decision = activeView.element;
+    if (!decision || !decision.name) return;
+
+    const currentName = String(decision.name).trim();
+    const currentId = String(decision.id || '');
+
+    // Only sync if name is different from ID and name is not empty
+    if (!currentName || currentName === currentId) return;
+
+    // Create a sanitized ID from the name
+    const sanitizedId = currentName
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/^[^a-zA-Z_]/, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '') || 'Decision_1';
+
+    // Update the decision ID to match the name
+    if (decision.id !== sanitizedId) {
+      console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${sanitizedId}"`);
+      decision.id = sanitizedId;
+
+      // Also update $attrs if it exists
+      if (decision.$attrs) {
+        decision.$attrs.id = sanitizedId;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to sync DMN decision ID with name:', e);
+  }
+}
+
 export function updateDmnTabTitle(state: DiagramTabState) {
   if (!tabsControl || !state.id) {
     console.log('DMN Tab Title: Missing tabsControl or state.id');
@@ -131,7 +169,19 @@ export function getIdForState(state: DiagramTabState): string | null {
       }
       return null;
     } else {
-      // For BPMN, use the existing pattern
+      // For BPMN, try to get ID directly from the modeler in the state first
+      if (state.modeler) {
+        try {
+          const canvas = state.modeler.get('canvas');
+          const rootElement = canvas.getRootElement();
+          const businessObject = rootElement.businessObject;
+          if (businessObject && businessObject.id) {
+            return String(businessObject.id);
+          }
+        } catch {}
+      }
+
+      // Fallback: use the existing pattern
       const runWithState = (window as any).runWithState;
       if (!runWithState) return null;
 

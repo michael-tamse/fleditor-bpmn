@@ -41,10 +41,38 @@ export function setTabSequence(seq: number) {
   tabSequence = seq;
 }
 
+function updateToolbarButtons(state: DiagramTabState | null) {
+  const saveXmlBtn = document.querySelector('#btn-save-xml') as HTMLButtonElement;
+  const saveSvgBtn = document.querySelector('#btn-save-svg') as HTMLButtonElement;
+
+  if (!saveXmlBtn || !saveSvgBtn) return;
+
+  if (!state) {
+    // No active tab - disable both buttons
+    saveXmlBtn.disabled = true;
+    saveSvgBtn.disabled = true;
+    saveXmlBtn.title = 'Kein Diagramm geöffnet';
+    saveSvgBtn.title = 'Kein Diagramm geöffnet';
+  } else {
+    // Active tab - enable XML, conditionally enable SVG
+    saveXmlBtn.disabled = false;
+    saveXmlBtn.title = state.kind === 'dmn' ? 'Als DMN speichern' : 'Als BPMN speichern';
+
+    if (state.kind === 'bpmn') {
+      saveSvgBtn.disabled = false;
+      saveSvgBtn.title = 'Als SVG speichern';
+    } else {
+      saveSvgBtn.disabled = true;
+      saveSvgBtn.title = 'SVG-Export nur für BPMN-Diagramme verfügbar';
+    }
+  }
+}
+
 export function setActiveTab(id: string | null) {
   if (!id) {
     activeTabState = null;
     modeler = null;
+    updateToolbarButtons(null);
     persistActiveTab(null);
     return;
   }
@@ -55,6 +83,9 @@ export function setActiveTab(id: string | null) {
 
   const applyPropertyPanelVisibility = (window as any).applyPropertyPanelVisibility;
   if (applyPropertyPanelVisibility) applyPropertyPanelVisibility(state);
+
+  // Update toolbar buttons based on active tab type
+  updateToolbarButtons(state);
 
   try {
     state.modeler.get('canvas').resized();

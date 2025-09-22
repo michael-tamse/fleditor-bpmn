@@ -34,7 +34,8 @@ export function setTabSequence(seq: number) {
 }
 
 function getActiveState(): DiagramTabState | null {
-  return activeTabState;
+  const getActiveStateFn = (window as any).getActiveState;
+  return getActiveStateFn ? getActiveStateFn() : activeTabState;
 }
 
 function hostAvailable(): boolean {
@@ -287,12 +288,20 @@ export async function saveXML() {
 }
 
 export async function saveSVG() {
-  if (!modeler) return;
+  const state = getActiveState();
+  if (!state || !state.modeler) return;
+
+  // SVG export is only supported for BPMN diagrams
+  if (state.kind !== 'bpmn') {
+    setStatus('SVG-Export nur für BPMN-Diagramme verfügbar');
+    return;
+  }
+
   try {
-    const { svg } = await modeler.saveSVG();
+    const { svg } = await state.modeler.saveSVG();
     let name = 'diagram.svg';
     try {
-      const { xml } = await modeler.saveXML({ format: false });
+      const { xml } = await state.modeler.saveXML({ format: false });
       const pid = deriveProcessId(xml);
       name = sanitizeFileName(((pid || 'diagram') + '.svg'));
     } catch {}
@@ -306,13 +315,21 @@ export async function saveSVG() {
 }
 
 export async function saveSVGWithSidecarFallback() {
-  if (!modeler) return;
+  const state = getActiveState();
+  if (!state || !state.modeler) return;
+
+  // SVG export is only supported for BPMN diagrams
+  if (state.kind !== 'bpmn') {
+    setStatus('SVG-Export nur für BPMN-Diagramme verfügbar');
+    return;
+  }
+
   try {
-    const { svg } = await modeler.saveSVG();
+    const { svg } = await state.modeler.saveSVG();
     if (hostAvailable() && sidecar) {
       let suggestedName = 'diagram.svg';
       try {
-        const { xml } = await modeler.saveXML({ format: false });
+        const { xml } = await state.modeler.saveXML({ format: false });
         const pid = deriveProcessId(xml);
         suggestedName = sanitizeFileName(((pid || 'diagram') + '.svg'));
       } catch {}
@@ -354,7 +371,7 @@ export async function prepareXmlForExport(): Promise<string> {
   if (!state) throw new Error('No active diagram state');
 
   if (state.kind === 'dmn') {
-    const { xml } = await modeler.saveXML({ format: true });
+    const { xml } = await state.modeler.saveXML({ format: true });
     const syncedXml = syncDmnDecisionIdWithName(xml);
     const cdataXml = wrapDmnTableValuesInCDATA(syncedXml);
     const cleanedXml = removeDMNDI(cdataXml);
@@ -367,8 +384,9 @@ export async function prepareXmlForExport(): Promise<string> {
     return cleanedXml;
   }
 
-  applyPreExportConfigurations();
-  const { xml } = await modeler.saveXML({ format: true });
+  const { applyPreExportConfigurations } = await import('./model-transformations');
+  applyPreExportConfigurations(state.modeler);
+  const { xml } = await state.modeler.saveXML({ format: true });
   return applyExportTransformations(xml);
 }
 

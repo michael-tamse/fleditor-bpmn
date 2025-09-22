@@ -6,11 +6,14 @@ export function setModeler(m: any) {
   modeler = m;
 }
 
-export function ensureDefaultOutboundMappingForSendTasks() {
+export function ensureDefaultOutboundMappingForSendTasks(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -48,11 +51,14 @@ export function ensureDefaultOutboundMappingForSendTasks() {
   }
 }
 
-export function ensureCorrelationParameterForReceiveTasks() {
+export function ensureCorrelationParameterForReceiveTasks(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -85,11 +91,14 @@ export function ensureCorrelationParameterForReceiveTasks() {
   }
 }
 
-export function ensureCorrelationParameterForIntermediateCatchEvents() {
+export function ensureCorrelationParameterForIntermediateCatchEvents(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -124,10 +133,13 @@ export function ensureCorrelationParameterForIntermediateCatchEvents() {
   }
 }
 
-export function stripMessageEventDefinitionsForFlowableEvents() {
+export function stripMessageEventDefinitionsForFlowableEvents(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
     if (!elementRegistry || !modeling) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -164,11 +176,14 @@ export function stripMessageEventDefinitionsForFlowableEvents() {
   }
 }
 
-export function ensureCorrelationParameterForStartEvents() {
+export function ensureCorrelationParameterForStartEvents(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -203,11 +218,14 @@ export function ensureCorrelationParameterForStartEvents() {
   }
 }
 
-export function ensureCorrelationParameterForBoundaryEvents() {
+export function ensureCorrelationParameterForBoundaryEvents(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -247,11 +265,14 @@ export function ensureCorrelationParameterForBoundaryEvents() {
   }
 }
 
-export function ensureSystemChannelForSendTasks() {
+export function ensureSystemChannelForSendTasks(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
-    const bpmnFactory = modeler.get('bpmnFactory');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
+    const bpmnFactory = m.get('bpmnFactory');
     if (!elementRegistry || !modeling || !bpmnFactory) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -286,10 +307,13 @@ export function ensureSystemChannelForSendTasks() {
   }
 }
 
-export function ensureDmnDefaultsForDecisionTasks() {
+export function ensureDmnDefaultsForDecisionTasks(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
     if (!elementRegistry || !modeling) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -326,10 +350,13 @@ export function ensureDmnDefaultsForDecisionTasks() {
   }
 }
 
-export function migrateAsyncFlags() {
+export function migrateAsyncFlags(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
     if (!elementRegistry || !modeling) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -363,10 +390,13 @@ export function migrateAsyncFlags() {
   }
 }
 
-export function ensureCallActivityDefaults() {
+export function ensureCallActivityDefaults(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
     if (!elementRegistry || !modeling) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -398,10 +428,13 @@ export function ensureCallActivityDefaults() {
   }
 }
 
-export function pruneInvalidCallActivityMappings() {
+export function pruneInvalidCallActivityMappings(currentModeler?: any) {
   try {
-    const elementRegistry = modeler.get('elementRegistry');
-    const modeling = modeler.get('modeling');
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const elementRegistry = m.get('elementRegistry');
+    const modeling = m.get('modeling');
     if (!elementRegistry || !modeling) return;
 
     const all = (elementRegistry.getAll && elementRegistry.getAll())
@@ -438,13 +471,19 @@ export function pruneInvalidCallActivityMappings() {
   }
 }
 
-export function applyPreExportConfigurations() {
-  ensureDefaultOutboundMappingForSendTasks();
-  ensureCorrelationParameterForReceiveTasks();
-  ensureCorrelationParameterForIntermediateCatchEvents();
-  stripMessageEventDefinitionsForFlowableEvents();
-  ensureCorrelationParameterForStartEvents();
-  ensureCorrelationParameterForBoundaryEvents();
-  ensureSystemChannelForSendTasks();
-  ensureDmnDefaultsForDecisionTasks();
+export function applyPreExportConfigurations(currentModeler?: any) {
+  const m = currentModeler || modeler;
+  if (!m) return;
+
+  ensureDefaultOutboundMappingForSendTasks(m);
+  ensureCorrelationParameterForReceiveTasks(m);
+  ensureCorrelationParameterForIntermediateCatchEvents(m);
+  stripMessageEventDefinitionsForFlowableEvents(m);
+  ensureCorrelationParameterForStartEvents(m);
+  ensureCorrelationParameterForBoundaryEvents(m);
+  ensureSystemChannelForSendTasks(m);
+  ensureDmnDefaultsForDecisionTasks(m);
+  migrateAsyncFlags(m);
+  ensureCallActivityDefaults(m);
+  pruneInvalidCallActivityMappings(m);
 }

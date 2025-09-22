@@ -84,6 +84,7 @@ import {
 
 import {
   updateDmnTabTitle,
+  syncDmnDecisionIdWithName,
   deriveDmnDecisionIdFromModel,
   createInitialDmnXmlWithDecisionId,
   getIdForState,
@@ -238,6 +239,7 @@ function initializeModules() {
     const { setActiveTab } = await import('./tab-manager');
     setActiveTab(id);
   };
+  (window as any).getActiveState = getActiveState;
   (window as any).getIdForState = getIdForState;
   (window as any).updateStateTitle = updateStateTitle;
   (window as any).persistActiveTab = persistActiveTab;
@@ -249,6 +251,7 @@ function initializeModules() {
   (window as any).setupModelerForState = setupModelerForState;
   (window as any).updateBaseline = updateBaseline;
   (window as any).updateDmnTabTitle = updateDmnTabTitle;
+  (window as any).syncDmnDecisionIdWithName = syncDmnDecisionIdWithName;
   (window as any).openFileIntoState = async (file: File, state: any) => {
     const { openFileIntoState } = await import('./file-operations');
     return openFileIntoState(file, state);
@@ -282,16 +285,26 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     initializeModules();
     initSidecar();
-  }, 100);
 
-  // Toolbar Events
-  document.querySelector('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
-  document.querySelector('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
-  document.querySelector('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
-  document.querySelector('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
-  document.querySelector('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
-  document.querySelector('#btn-zoom-reset')?.addEventListener('click', zoomReset);
-  document.querySelector('#btn-fit')?.addEventListener('click', fitViewport);
+    // Toolbar Events - register after modules are initialized
+    document.querySelector('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
+    document.querySelector('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
+    document.querySelector('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
+
+    // Initialize toolbar button states
+    const saveXmlBtn = document.querySelector('#btn-save-xml') as HTMLButtonElement;
+    const saveSvgBtn = document.querySelector('#btn-save-svg') as HTMLButtonElement;
+    if (saveXmlBtn && saveSvgBtn) {
+      saveXmlBtn.disabled = true;
+      saveSvgBtn.disabled = true;
+      saveXmlBtn.title = 'Kein Diagramm geöffnet';
+      saveSvgBtn.title = 'Kein Diagramm geöffnet';
+    }
+    document.querySelector('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
+    document.querySelector('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
+    document.querySelector('#btn-zoom-reset')?.addEventListener('click', zoomReset);
+    document.querySelector('#btn-fit')?.addEventListener('click', fitViewport);
+  }, 100);
 
   // Start-Tiles Event-Handler
   document.addEventListener('click', (e) => {

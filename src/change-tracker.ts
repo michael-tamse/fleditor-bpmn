@@ -27,7 +27,13 @@ function getIdForState(state: DiagramTabState): string | null {
 }
 
 function updateDmnTabTitle(state: DiagramTabState) {
-  // Placeholder - implemented in DMN support
+  const updateFn = (window as any).updateDmnTabTitle;
+  if (updateFn) updateFn(state);
+}
+
+function syncDmnDecisionIdWithName(state: DiagramTabState) {
+  const syncFn = (window as any).syncDmnDecisionIdWithName;
+  if (syncFn) syncFn(state);
 }
 
 export function setDirtyState(state: DiagramTabState, dirty: boolean) {
@@ -145,6 +151,7 @@ export function bindDmnTabEvents(state: DiagramTabState) {
 
       const updateTitle = debounce(() => {
         console.log('DMN Event: Updating tab title due to change');
+        syncDmnDecisionIdWithName(state);
         updateDmnTabTitle(state);
       }, 200);
 
@@ -156,6 +163,8 @@ export function bindDmnTabEvents(state: DiagramTabState) {
       unbindActiveViewer = () => {
         eventBus.off('elements.changed', markDirty);
         eventBus.off('commandStack.changed', markDirty);
+        eventBus.off('elements.changed', updateTitle);
+        eventBus.off('commandStack.changed', updateTitle);
       };
 
       console.log('DMN Event: Bound to active viewer:', activeViewer.type || 'unknown');
