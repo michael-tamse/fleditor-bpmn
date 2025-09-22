@@ -374,10 +374,10 @@ function bindModelerEvents(state: DiagramTabState) {
   if (eventBus) {
     eventBus.on('commandStack.changed', () => {
       scheduleDirtyCheck(state);
-      // Update tab title live when the process id changes
+      // Update tab title live when the process/decision id changes
       try {
-        const pid = runWithState(state, () => deriveProcessIdFromModel());
-        if (pid) updateStateTitle(state, pid);
+        const id = getIdForState(state);
+        if (id) updateStateTitle(state, id);
       } catch {}
     });
     eventBus.on('import.render.start', () => { state.isImporting = true; });
@@ -852,9 +852,9 @@ function initTabs() {
       const state = tabStates.get(id);
       if (!state) return true;
       if (!state.dirty) return true;
-      let pid: string | null = null;
-      try { pid = runWithState(state, () => deriveProcessIdFromModel()) as any; } catch {}
-      const titleMsg = `${pid ? `[${pid}] ` : ''}Tab schließen?`;
+      let stateId: string | null = null;
+      try { stateId = getIdForState(state); } catch {}
+      const titleMsg = `${stateId ? `[${stateId}] ` : ''}Tab schließen?`;
       return await showConfirmDialog('Es gibt ungespeicherte Änderungen. Tab trotzdem schließen?', titleMsg);
     },
     onDestroyPanel(id) {
@@ -1265,16 +1265,60 @@ function deriveProcessIdFromModel(): string | null {
   return null;
 }
 
+// Try to read the current Decision id directly from the DMN in-memory model
+function deriveDmnDecisionIdFromModel(): string | null {
+  try {
+    // Get current active view (similar to updateDmnTabTitle)
+    const activeView = modeler.getActiveView();
+    if (!activeView || !activeView.element) return null;
+
+    // Get the decision element
+    const decision = activeView.element;
+    if (!decision) return null;
+
+    // Extract decision ID (same logic as updateDmnTabTitle)
+    if (decision.id) {
+      return String(decision.id);
+    } else if (decision.$attrs && decision.$attrs.id) {
+      return String(decision.$attrs.id);
+    }
+
+    return null;
+  } catch (e) {
+    console.warn('Failed to derive DMN decision ID from model:', e);
+    return null;
+  }
+}
+
+function getIdForState(state: DiagramTabState): string | null {
+  try {
+    return runWithState(state, () => {
+      if (state.kind === 'dmn') {
+        return deriveDmnDecisionIdFromModel();
+      } else {
+        return deriveProcessIdFromModel();
+      }
+    }) as any;
+  } catch { return null; }
+}
+
 function getProcessIdForState(state: DiagramTabState): string | null {
   try { return runWithState(state, () => deriveProcessIdFromModel()) as any; } catch { return null; }
 }
 
 function findTabByProcessId(pid: string): DiagramTabState | null {
   if (!pid) return null;
+  console.log('[findTabByProcessId] Looking for ID:', pid);
+
   for (const state of tabStates.values()) {
-    const spid = getProcessIdForState(state);
-    if (spid && spid === pid) return state;
+    const spid = getIdForState(state);
+    console.log('[findTabByProcessId] Comparing with tab', state.id, 'ID:', spid, 'kind:', state.kind);
+    if (spid && spid === pid) {
+      console.log('[findTabByProcessId] Match found in tab:', state.id);
+      return state;
+    }
   }
+  console.log('[findTabByProcessId] No match found');
   return null;
 }
 
@@ -1319,15 +1363,20 @@ async function openXmlConsideringDuplicates(xml: string, fileName?: string, sour
   // Detect diagram type first
   const diagramType = detectDiagramType(xml);
 
+  console.log('[openXmlConsideringDuplicates] Diagram type detected:', diagramType);
+
   // Get appropriate ID based on diagram type
   let id: string | null;
   if (diagramType === 'dmn') {
     id = deriveDmnId(xml);
+    console.log('[openXmlConsideringDuplicates] DMN ID extracted:', id);
   } else {
     id = deriveProcessId(xml);
+    console.log('[openXmlConsideringDuplicates] BPMN ID extracted:', id);
   }
 
   const existing = id ? findTabByProcessId(id) : null;
+  console.log('[openXmlConsideringDuplicates] Existing tab found:', existing ? existing.id : 'none');
   if (!existing) {
     const title = id || (fileName || `Diagramm ${tabSequence}`);
     createDiagramTab({
