@@ -11,7 +11,7 @@ interface TabEvents {
   onClose?(id: TabId): Promise<boolean> | boolean;     // return false, um Schließen zu verhindern
   onCreatePanel?(id: TabId, panelEl: HTMLElement): void;
   onDestroyPanel?(id: TabId, panelEl: HTMLElement): void;
-  onAddRequest?(diagramType: 'bpmn' | 'dmn'): void;
+  onAddRequest?(kind: 'bpmn' | 'dmn' | 'event'): void;
 }
 
 export class Tabs {
@@ -33,8 +33,8 @@ export class Tabs {
     this.panels  = root.querySelector('.panels')!;
     this.leftBtn = root.querySelector('.scroll-btn.left') as HTMLButtonElement;
     this.rightBtn= root.querySelector('.scroll-btn.right') as HTMLButtonElement;
-    this.addBtn  = root.querySelector('.add-tab') as HTMLButtonElement | null;
-    this.addMenu = root.querySelector('.add-tab-menu') as HTMLElement | null;
+    this.addBtn  = root.querySelector('.add-new') as HTMLButtonElement | null;
+    this.addMenu = root.querySelector('.add-menu') as HTMLElement | null;
 
     this.bind();
     this.ro = new ResizeObserver(() => this.updateOverflow());
@@ -245,10 +245,10 @@ export class Tabs {
     // Add menu handlers
     this.addMenu?.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      const diagramType = target.getAttribute('data-diagram-type') as 'bpmn' | 'dmn';
-      if (diagramType) {
+      const kind = target.getAttribute('data-kind') as 'bpmn' | 'dmn' | 'event';
+      if (kind) {
         this.hideAddMenu();
-        this.events.onAddRequest?.(diagramType);
+        this.events.onAddRequest?.(kind);
       }
     });
 

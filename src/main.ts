@@ -23,12 +23,30 @@ import DmnJS from 'dmn-js/lib/Modeler';
 // import DecisionTableEditor from 'dmn-js/lib/decision-table/Modeler';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
 import { Tabs } from './bpmn-tabs/tabs';
+import {
+  deriveProcessId,
+  deriveDmnId,
+  sanitizeFileName,
+  syncDmnDecisionIdWithName,
+  standardizeDmnDefinitions,
+  removeDMNDI,
+  removeCDATAFromDmnTableValues,
+  wrapDmnTableValuesInCDATA,
+  createInitialXmlWithProcessId,
+  applyImportTransformations,
+  applyExportTransformations,
+  applyPreExportConfigurations,
+  applyImportModelTransformations
+} from './bpmn-xml-utils';
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel);
 const statusEl = $('#status');
 
+type TabKind = TabKind | 'event';
+
 interface DiagramTabState {
   id: string;
+  kind: TabKind;
   modeler: any;
   panelEl: HTMLElement;
   layoutEl: HTMLElement;
@@ -40,7 +58,6 @@ interface DiagramTabState {
   baselineHash?: number;
   dirtyTimer?: any;
   isImporting: boolean;
-  diagramType: 'bpmn' | 'dmn';
 }
 
 interface DiagramInit {
@@ -49,7 +66,7 @@ interface DiagramInit {
   fileName?: string;
   statusMessage?: string;
   activate?: boolean;
-  diagramType?: 'bpmn' | 'dmn';
+  kind?: TabKind;
 }
 
 const tabStates = new Map<string, DiagramTabState>();
@@ -308,7 +325,7 @@ async function updateBaseline(state: DiagramTabState) {
     state.baselineHash = hashString(xml);
 
     let derivedTitle: string | null;
-    if (state.diagramType === 'dmn') {
+    if (state.kind === 'dmn') {
       derivedTitle = deriveDecisionId(xml);
     } else {
       derivedTitle = deriveProcessId(xml);
@@ -384,21 +401,31 @@ function bindDmnTabEvents(state: DiagramTabState) {
   // DMN-js Standard-Events wie im Original
   try {
     state.modeler.on('views.changed', () => {
+      console.log('DMN Event: views.changed fired');
       scheduleDirtyCheckDmn(state);
       updateDmnTabTitle(state);
     });
 
     state.modeler.on('view.contentChanged', () => {
+      console.log('DMN Event: view.contentChanged fired');
       scheduleDirtyCheckDmn(state);
       updateDmnTabTitle(state);
     });
 
     // Listen for element property changes (like decision ID changes)
     state.modeler.on('element.changed', () => {
+      console.log('DMN Event: element.changed fired');
+      updateDmnTabTitle(state);
+    });
+
+    // Additional events to try
+    state.modeler.on('commandStack.changed', () => {
+      console.log('DMN Event: commandStack.changed fired');
       updateDmnTabTitle(state);
     });
 
     // Initial tab title update (with delay to ensure data is loaded)
+    console.log('DMN Tab Title: Setting up initial update');
     setTimeout(() => updateDmnTabTitle(state), 100);
   } catch (e) {
     console.warn('Failed to bind DMN events:', e);
@@ -406,27 +433,55 @@ function bindDmnTabEvents(state: DiagramTabState) {
 }
 
 function updateDmnTabTitle(state: DiagramTabState) {
-  if (!tabsControl || !state.id) return;
+  if (!tabsControl || !state.id) {
+    console.log('DMN Tab Title: Missing tabsControl or state.id');
+    return;
+  }
 
   try {
+    console.log('DMN Tab Title: Updating for state:', state.id);
+
     // Get current active view
     const activeView = state.modeler.getActiveView();
-    if (!activeView) return;
+    console.log('DMN Tab Title: Active view:', activeView);
+
+    if (!activeView) {
+      console.log('DMN Tab Title: No active view');
+      return;
+    }
 
     // Get the decision element
     const decision = activeView.element;
-    if (!decision) return;
+    console.log('DMN Tab Title: Decision element:', decision);
+
+    if (!decision) {
+      console.log('DMN Tab Title: No decision element');
+      return;
+    }
 
     // Extract decision ID or name
     let title = 'DMN Entscheidung';
 
-    if (decision.id) {
+    console.log('DMN Tab Title: Decision properties:', {
+      id: decision.id,
+      name: decision.name,
+      $attrs: decision.$attrs,
+      keys: Object.keys(decision)
+    });
+
+    // Use name as title if available, otherwise use ID
+    // This provides better UX - users see the descriptive name, not the technical ID
+    if (decision.name && decision.name.trim()) {
+      title = decision.name.trim();
+    } else if (decision.id) {
       title = decision.id;
-    } else if (decision.name) {
-      title = decision.name;
     } else if (decision.$attrs && decision.$attrs.id) {
       title = decision.$attrs.id;
     }
+
+    // Note: ID-Name synchronization happens during save via syncDmnDecisionIdWithName() in DMN utils
+
+    console.log('DMN Tab Title: Setting title to:', title);
 
     // Update tab title
     tabsControl.setTitle(state.id, title);
@@ -579,7 +634,7 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
   let prepared: string;
   let inferredTitle: string | null;
 
-  if (state.diagramType === 'dmn') {
+  if (state.kind === 'dmn') {
     prepared = xml;
     inferredTitle = deriveDecisionId(prepared);
   } else {
@@ -590,7 +645,7 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
   if (inferredTitle) updateStateTitle(state, inferredTitle);
 
   try {
-    if (state.diagramType === 'dmn') {
+    if (state.kind === 'dmn') {
       // DMN Standard-Import
       await runWithState(state, () => state.modeler.importXML(prepared));
 
@@ -624,7 +679,7 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
 }
 
 function setupModelerForState(state: DiagramTabState) {
-  if (state.diagramType === 'dmn') {
+  if (state.kind === 'dmn') {
     // DMN Web Component handles its own events
     bindDmnTabEvents(state);
     bindDragAndDrop(state);
@@ -668,10 +723,10 @@ function initTabs() {
       const layout = document.createElement('div');
       layout.className = 'diagram-pane';
 
-      const diagramType = pendingTabInits.get(id)?.diagramType || 'bpmn';
+      const kind = pendingTabInits.get(id)?.kind || 'bpmn';
 
       const canvas = document.createElement('div');
-      if (diagramType === 'dmn') {
+      if (kind === 'dmn') {
         canvas.className = 'canvas dmn-canvas';
         canvas.setAttribute('aria-label', 'DMN Arbeitsfläche');
         // Spezielle DMN Container-Properties
@@ -692,7 +747,7 @@ function initTabs() {
       panel.appendChild(layout);
 
       let instance: any;
-      if (diagramType === 'dmn') {
+      if (kind === 'dmn') {
         // Create DMN instance mit alternativer Konfiguration
         instance = new DmnJS({
           container: canvas
@@ -720,7 +775,7 @@ function initTabs() {
         title: '',
         dirty: false,
         isImporting: false,
-        diagramType
+        kind
       };
 
       tabStates.set(id, state);
@@ -728,10 +783,10 @@ function initTabs() {
       updateEmptyStateVisibility();
 
       const init = pendingTabInits.get(id) ?? {
-        title: diagramType === 'dmn' ? `Entscheidung ${tabSequence}` : `Diagramm ${tabSequence}`,
-        xml: diagramType === 'dmn' ? initialDmnXml : initialXml,
-        statusMessage: diagramType === 'dmn' ? 'Neue DMN Entscheidungstabelle geladen' : 'Neues Diagramm geladen',
-        diagramType
+        title: kind === 'dmn' ? `Entscheidung ${tabSequence}` : `Diagramm ${tabSequence}`,
+        xml: kind === 'dmn' ? initialDmnXml : initialXml,
+        statusMessage: kind === 'dmn' ? 'Neue DMN Entscheidungstabelle geladen' : 'Neues Diagramm geladen',
+        kind
       };
       pendingTabInits.delete(id);
 
@@ -770,21 +825,28 @@ function initTabs() {
       }
       updateEmptyStateVisibility();
     },
-    onAddRequest(diagramType: 'bpmn' | 'dmn') {
-      createNewDiagram(diagramType);
+    onAddRequest(kind: TabKind) {
+      createNewDiagram(kind);
     }
   });
 }
 
-function createNewDiagram(diagramType: 'bpmn' | 'dmn' = 'bpmn') {
-  if (diagramType === 'dmn') {
+function createNewDiagram(kind: TabKind = 'bpmn') {
+  if (kind === 'dmn') {
     const decisionId = `Decision_${tabSequence}`;
     const xml = createInitialDmnXmlWithDecisionId(decisionId);
     createDiagramTab({
       title: decisionId,
       xml,
       statusMessage: 'Neue DMN Entscheidungstabelle geladen',
-      diagramType: 'dmn'
+      kind: 'dmn'
+    });
+  } else if (kind === 'event') {
+    const eventId = `Event_${tabSequence}`;
+    createDiagramTab({
+      title: eventId,
+      statusMessage: 'Neuer Event-Tab (Platzhalter)',
+      kind: 'event'
     });
   } else {
     const nextPid = computeNextProcessId();
@@ -793,7 +855,7 @@ function createNewDiagram(diagramType: 'bpmn' | 'dmn' = 'bpmn') {
       title: nextPid,
       xml,
       statusMessage: 'Neues Diagramm geladen',
-      diagramType: 'bpmn'
+      kind: 'bpmn'
     });
   }
 }
@@ -1350,6 +1412,22 @@ function download(filename: string, data: string, type: string) {
 
 // Build Flowable-export XML (used by save + sidecar)
 async function prepareXmlForExport(): Promise<string> {
+  const state = getActiveState();
+  if (!state) throw new Error('No active diagram state');
+
+  // Handle DMN diagrams
+  if (state.kind === 'dmn') {
+    const { xml } = await modeler.saveXML({ format: true });
+    // Apply DMN-specific processing: sync decision ID with name
+    const syncedXml = syncDmnDecisionIdWithName(xml);
+    debug('DMN save: ID-name synchronization applied', {
+      original: xml.length,
+      synced: syncedXml.length
+    });
+    return syncedXml;
+  }
+
+  // Handle BPMN diagrams (existing logic)
   // Persist defaults before export and prune incomplete mappings
   ensureCallActivityDefaults();
   pruneInvalidCallActivityMappings();
@@ -2610,6 +2688,18 @@ $('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
 $('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
 $('#btn-zoom-reset')?.addEventListener('click', zoomReset);
 $('#btn-fit')?.addEventListener('click', fitViewport);
+
+// Start-Tiles Event-Handler
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  const tile = target.closest('.tile[data-kind]') as HTMLElement;
+  if (tile) {
+    const kind = tile.getAttribute('data-kind') as 'bpmn' | 'dmn' | 'event';
+    if (kind) {
+      createNewDiagram(kind);
+    }
+  }
+});
 
 initTabs();
 updateEmptyStateVisibility();

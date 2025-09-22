@@ -38,11 +38,12 @@
           <button class="scroll-btn left" aria-hidden="true" tabindex="-1" title="Nach links scrollen">◀</button>
           <div class="tablist" role="tablist" aria-label="Geöffnete Diagramme"></div>
           <button class="scroll-btn right" aria-hidden="true" tabindex="-1" title="Nach rechts scrollen">▶</button>
-          <div class="add-tab-container">
-            <button class="add-tab" type="button" title="Neues Diagramm" aria-label="Neuen Tab anlegen">＋</button>
-            <div class="add-tab-menu">
-              <button type="button" data-diagram-type="bpmn">BPMN Diagramm</button>
-              <button type="button" data-diagram-type="dmn">DMN Entscheidungstabelle</button>
+          <div class="add-split">
+            <button class="add-new" type="button" title="Neues Diagramm" aria-label="Neues Diagramm" aria-haspopup="menu" aria-expanded="false" aria-controls="add-menu">＋ Neues Diagramm</button>
+            <div id="add-menu" class="add-menu" role="menu" aria-label="Neues Diagramm anlegen">
+              <button type="button" data-kind="bpmn" role="menuitem">BPMN‑Diagramm · Prozessmodell</button>
+              <button type="button" data-kind="dmn" role="menuitem">DMN‑Entscheidung · Entscheidungstabelle</button>
+              <button type="button" data-kind="event" role="menuitem">Event‑Definition · Event Registry</button>
             </div>
           </div>
         </div>
@@ -50,7 +51,24 @@
           <div id="emptyState" class="empty-state" aria-live="polite">
             <div class="hint">
               <div class="title">Kein Diagramm geöffnet</div>
-              <div class="text">Mit ＋ neues Diagramm anlegen oder „Öffnen“ verwenden.</div>
+              <div class="text">Mit ＋ neues Diagramm anlegen oder „Öffnen" verwenden.</div>
+              <div class="start-tiles" role="group" aria-label="Neues Dokument anlegen">
+                <button class="tile" data-kind="bpmn" type="button">
+                  <span class="type-icon bpmn" aria-hidden="true">B</span>
+                  <span class="tile-title">BPMN‑Diagramm</span>
+                  <span class="tile-sub">Prozessmodell erstellen</span>
+                </button>
+                <button class="tile" data-kind="dmn" type="button">
+                  <span class="type-icon dmn" aria-hidden="true">D</span>
+                  <span class="tile-title">DMN‑Entscheidung</span>
+                  <span class="tile-sub">Entscheidungstabelle</span>
+                </button>
+                <button class="tile" data-kind="event" type="button">
+                  <span class="type-icon event" aria-hidden="true">E</span>
+                  <span class="tile-title">Event‑Definition</span>
+                  <span class="tile-sub">Event Registry</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
