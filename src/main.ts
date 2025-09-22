@@ -1420,11 +1420,17 @@ async function prepareXmlForExport(): Promise<string> {
     const { xml } = await modeler.saveXML({ format: true });
     // Apply DMN-specific processing: sync decision ID with name
     const syncedXml = syncDmnDecisionIdWithName(xml);
-    debug('DMN save: ID-name synchronization applied', {
+    // Wrap inputEntry and outputEntry values in CDATA for special characters
+    const cdataXml = wrapDmnTableValuesInCDATA(syncedXml);
+    // Remove DMNDI sections for better compatibility
+    const cleanedXml = removeDMNDI(cdataXml);
+    debug('DMN save: ID-name sync, CDATA wrapping, and DMNDI removal applied', {
       original: xml.length,
-      synced: syncedXml.length
+      synced: syncedXml.length,
+      cdata: cdataXml.length,
+      cleaned: cleanedXml.length
     });
-    return syncedXml;
+    return cleanedXml;
   }
 
   // Handle BPMN diagrams (existing logic)

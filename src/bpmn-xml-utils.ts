@@ -196,10 +196,13 @@ export function wrapDmnTableValuesInCDATA(xml: string): string {
       return xml;
     }
 
-    // Only wrap text elements that contain special characters that need CDATA
+    // Process <text> elements within DMN structures
+    let result = xml;
+
+    // Pattern to match <text>content</text> where content needs CDATA
     const textPattern = /(<text[^>]*>)([^<]*?)(<\/text>)/gi;
 
-    return xml.replace(textPattern, (match, openTag, content, closeTag) => {
+    result = result.replace(textPattern, (match, openTag, content, closeTag) => {
       const trimmedContent = content.trim();
 
       // Skip if already has CDATA or is empty
@@ -207,19 +210,26 @@ export function wrapDmnTableValuesInCDATA(xml: string): string {
         return match;
       }
 
-      // Only wrap if content contains characters that benefit from CDATA
-      const needsCDATA = /[<>&"'=]/.test(trimmedContent) ||
-                         trimmedContent.includes('==') ||
-                         trimmedContent.includes('!=') ||
-                         trimmedContent.includes('<=') ||
-                         trimmedContent.includes('>=');
+      // Always wrap text content in inputEntry and outputEntry contexts for consistency
+      // This ensures all DMN expressions are properly CDATA-wrapped
+      const needsCDATA = true; // Conservative approach: wrap all non-empty text in DMN contexts
 
       if (needsCDATA) {
-        return `${openTag}<![CDATA[${trimmedContent}]]>${closeTag}`;
+        // Decode HTML entities before wrapping in CDATA since CDATA preserves raw content
+        const decodedContent = trimmedContent
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+
+        return `${openTag}<![CDATA[${decodedContent}]]>${closeTag}`;
       }
 
       return match;
     });
+
+    return result;
   } catch (error) {
     console.error('Error wrapping DMN table values in CDATA:', error);
     return xml;
