@@ -8,6 +8,7 @@ import {
   applyExportTransformations,
   applyPreExportConfigurations
 } from './bpmn-xml-utils';
+import { showConfirmDialog } from './ui-controls';
 
 import { DiagramTabState, DiagramInit, SidecarBridge } from './types';
 
@@ -59,63 +60,6 @@ function setStatus(msg?: string) {
   if (setStatusFn) setStatusFn(msg);
 }
 
-function showConfirmDialog(
-  message: string,
-  title?: string,
-  options?: {
-    okLabel?: string;
-    okVariant?: 'primary' | 'secondary' | 'danger';
-    cancelLabel?: string;
-  }
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const confirmModal = document.querySelector('#confirm-modal') as HTMLDialogElement;
-    const confirmTitle = confirmModal.querySelector('#confirm-title');
-    const confirmMessage = confirmModal.querySelector('#confirm-message');
-    const confirmOk = confirmModal.querySelector('#confirm-ok') as HTMLButtonElement;
-    const confirmCancel = confirmModal.querySelector('#confirm-cancel') as HTMLButtonElement;
-
-    if (confirmTitle) confirmTitle.textContent = title || 'Bestätigung';
-    if (confirmMessage) confirmMessage.textContent = message;
-    if (confirmOk) {
-      confirmOk.textContent = options?.okLabel || 'OK';
-      confirmOk.className = `btn ${
-        options?.okVariant === 'danger' ? 'btn-danger' :
-        options?.okVariant === 'secondary' ? 'btn-secondary' : 'btn-primary'
-      }`;
-    }
-    if (confirmCancel) confirmCancel.textContent = options?.cancelLabel || 'Abbrechen';
-
-    const cleanup = () => {
-      confirmOk?.removeEventListener('click', onOk);
-      confirmCancel?.removeEventListener('click', onCancel);
-      confirmModal?.removeEventListener('close', onClose);
-    };
-
-    const onOk = () => {
-      cleanup();
-      confirmModal?.close();
-      resolve(true);
-    };
-
-    const onCancel = () => {
-      cleanup();
-      confirmModal?.close();
-      resolve(false);
-    };
-
-    const onClose = () => {
-      cleanup();
-      resolve(false);
-    };
-
-    confirmOk?.addEventListener('click', onOk);
-    confirmCancel?.addEventListener('click', onCancel);
-    confirmModal?.addEventListener('close', onClose);
-
-    confirmModal?.showModal();
-  });
-}
 
 async function updateBaseline(state: DiagramTabState) {
   const { updateBaseline } = await import('./change-tracker');

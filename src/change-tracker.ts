@@ -143,8 +143,15 @@ export function bindDmnTabEvents(state: DiagramTabState) {
         scheduleDirtyCheckDmn(state);
       }, 100);
 
+      const updateTitle = debounce(() => {
+        console.log('DMN Event: Updating tab title due to change');
+        updateDmnTabTitle(state);
+      }, 200);
+
       eventBus.on('elements.changed', markDirty);
       eventBus.on('commandStack.changed', markDirty);
+      eventBus.on('elements.changed', updateTitle);
+      eventBus.on('commandStack.changed', updateTitle);
 
       unbindActiveViewer = () => {
         eventBus.off('elements.changed', markDirty);
