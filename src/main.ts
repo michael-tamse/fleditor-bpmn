@@ -688,7 +688,7 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
     prepared = xml;
     inferredTitle = deriveDecisionId(prepared);
   } else {
-    prepared = init.xml ? normalizeErrorRefOnImport(expandSubProcessShapesInDI(prefixVariableChildrenForImport(xml))) : xml;
+    prepared = init.xml ? applyImportTransformations(xml) : xml;
     inferredTitle = deriveProcessId(prepared);
   }
 
@@ -1233,12 +1233,6 @@ function triggerOpen() {
   (input as HTMLInputElement).click();
 }
 
-function deriveProcessId(xml: string): string | null {
-  try {
-    const m = /<([\w-]+:)?process\b[^>]*\bid\s*=\s*\"([^\"]+)\"/i.exec(xml);
-    return m ? m[2] : null;
-  } catch { return null; }
-}
 
 function deriveDecisionId(xml: string): string | null {
   try {
@@ -1382,9 +1376,6 @@ async function openXmlConsideringDuplicates(xml: string, fileName?: string, sour
   });
 }
 
-function sanitizeFileName(name: string): string {
-  return name.replace(/[\\/:*?\"<>|\n\r]+/g, '_');
-}
 
 function detectDiagramType(xml: string): 'bpmn' | 'dmn' {
   // Check for DMN namespace and decision elements
@@ -1519,31 +1510,10 @@ async function prepareXmlForExport(): Promise<string> {
   }
 
   // Handle BPMN diagrams (existing logic)
-  // Persist defaults before export and prune incomplete mappings
-  ensureCallActivityDefaults();
-  pruneInvalidCallActivityMappings();
-  ensureDmnDefaultsForDecisionTasks();
-  ensureSystemChannelForSendTasks();
-  ensureDefaultOutboundMappingForSendTasks();
-  ensureCorrelationParameterForReceiveTasks();
-  ensureCorrelationParameterForIntermediateCatchEvents();
-  ensureCorrelationParameterForBoundaryEvents();
-  ensureCorrelationParameterForStartEvents();
-  ensureStartEventCorrelationConfigurationForStartEvents();
+  // Apply pre-export configurations
+  applyPreExportConfigurations();
   const { xml } = await modeler.saveXML({ format: true });
-  const withCdata = wrapConditionExpressionsInCDATA(xml);
-  const withEventTypeCdata = wrapEventTypeInCDATA(withCdata);
-  const withSendSyncCdata = wrapSendSynchronouslyInCDATA(withEventTypeCdata);
-  const withStartCfgCdata = wrapStartEventCorrelationConfigurationInCDATA(withSendSyncCdata);
-  const withFlowableStringCdata = wrapFlowableStringInCDATA(withStartCfgCdata);
-  const withDecisionRefCdata = wrapDecisionReferenceTypeInCDATA(withFlowableStringCdata);
-  const withoutMessageDefs = stripMessageEventDefinitionsInXML(withDecisionRefCdata);
-  const mappedSendTasks = mapSendTaskToServiceOnExport(withoutMessageDefs);
-  const mappedBusinessRule = mapBusinessRuleToServiceDmnOnExport(mappedSendTasks);
-  const withErrorRefCodes = mapErrorRefToErrorCodeOnExport(mappedBusinessRule);
-  const reconciledErrors = reconcileErrorDefinitionsOnExport(withErrorRefCodes);
-  const withExternalWorkerStencils = ensureExternalWorkerStencilsOnExport(reconciledErrors);
-  return toFlowableDefinitionHeader(withExternalWorkerStencils);
+  return applyExportTransformations(xml);
 }
 
 // Sidecar UI helpers
@@ -1715,290 +1685,12 @@ function initSidecar() {
   }
 }
 
-// Ensure all conditionExpression bodies are wrapped in CDATA
-function wrapConditionExpressionsInCDATA(xml: string): string {
-  try {
-    const re = /(<(?:[\w-]+:)?conditionExpression\b[^>]*>)([\s\S]*?)(<\/(?:[\w-]+:)?conditionExpression>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      const unescaped = trimmed
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&');
-      return `${open}<![CDATA[${unescaped}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
 
-// Prefix unqualified <variable> children inside <flowable:variableAggregation> for import,
-// so the moddle maps them to flowable:Variable. We remove the prefix again on export.
-function prefixVariableChildrenForImport(xml: string): string {
-  try {
-    const re = /(\<flowable:variableAggregation\b[\s\S]*?\>)([\s\S]*?)(\<\/flowable:variableAggregation\>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const transformed = inner
-        .replace(/<\s*variable\b/g, '<flowable:variable')
-        .replace(/<\/(\s*)variable\s*>/g, '</flowable:variable>');
-      return `${open}${transformed}${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
 
-// Normalize Flowable-style errorRef (holding errorCode) to proper BPMN references:
-// - If errorEventDefinition@errorRef references a non-existent ID but matches an existing <error errorCode="...">,
-//   replace it with that <error>'s id.
-// - If no matching <error> exists, create one under <definitions> and point errorRef to it.
-function normalizeErrorRefOnImport(xml: string): string {
-  try {
-    // Collect existing <error id=... errorCode=...>
-    const idToCode = new Map<string, string>();
-    const codeToId = new Map<string, string>();
-    const reError = /<([\w-]+:)?error\b([^>]*)>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = reError.exec(xml))) {
-      const attrs = m[2] || '';
-      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs);
-      const codeMatch = /\berrorCode\s*=\s*"([^"]*)"/i.exec(attrs);
-      if (idMatch) {
-        const id = idMatch[1];
-        const code = codeMatch ? codeMatch[1] : '';
-        idToCode.set(id, code);
-        if (code) codeToId.set(code, id);
-      }
-    }
 
-    // Track new errors to inject
-    const newErrors: Array<{ id: string, code: string, name: string } > = [];
 
-    // Replace errorRef in errorEventDefinition if needed
-    const reErrDefRef = /(<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*")([^"]+)(")/gi;
-    let changed = false;
-    const replaced = xml.replace(reErrDefRef, (full, pre, _ns, ref, post) => {
-      // already an existing error ID?
-      if (idToCode.has(ref)) return full;
-      // treat as code: find existing error by code or create one
-      let targetId = codeToId.get(ref);
-      if (!targetId) {
-        // generate new unique id
-        const base = 'Error_' + (ref || 'code').replace(/[^A-Za-z0-9_\-]/g, '_');
-        let candidate = base;
-        let i = 1;
-        while (idToCode.has(candidate)) { candidate = base + '_' + (++i); }
-        targetId = candidate;
-        idToCode.set(targetId, ref);
-        codeToId.set(ref, targetId);
-        newErrors.push({ id: targetId, code: ref, name: ref });
-      }
-      changed = true;
-      return `${pre}${targetId}${post}`;
-    });
 
-    if (!changed && !newErrors.length) return xml;
 
-    // Inject any newly created <error> elements before </definitions>
-    if (newErrors.length) {
-      // detect prefix used for definitions and error elements
-      const defMatch = /<([\w-]+:)?definitions\b[^>]*>/i.exec(replaced);
-      const ns = defMatch && defMatch[1] ? defMatch[1] : 'bpmn:';
-      const injection = newErrors.map(e => `  <${ns}error id="${e.id}" name="${escapeXml(e.name)}" errorCode="${escapeXml(e.code)}" />`).join('\n');
-      const reClose = /(<\/(?:[\w-]+:)?definitions>)/i;
-      if (reClose.test(replaced)) {
-        return replaced.replace(reClose, `${injection}\n$1`);
-      } else {
-        // fallback: append at end
-        return replaced + `\n${injection}\n`;
-      }
-    }
-    return replaced;
-  } catch {
-    return xml;
-  }
-}
-
-function escapeXml(s: string): string {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-// Ensure flowable:eventType body is wrapped in CDATA
-function wrapEventTypeInCDATA(xml: string): string {
-  try {
-    const re = /(<flowable:eventType\b[^>]*>)([\s\S]*?)(<\/flowable:eventType>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      if (!trimmed) return _m;
-      return `${open}<![CDATA[${trimmed}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Ensure flowable:sendSynchronously body is wrapped in CDATA if present
-function wrapSendSynchronouslyInCDATA(xml: string): string {
-  try {
-    const re = /(<flowable:sendSynchronously\b[^>]*>)([\s\S]*?)(<\/flowable:sendSynchronously>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      if (!trimmed) return _m;
-      return `${open}<![CDATA[${trimmed}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Ensure flowable:startEventCorrelationConfiguration body is wrapped in CDATA if present
-function wrapStartEventCorrelationConfigurationInCDATA(xml: string): string {
-  try {
-    const re = /(<flowable:startEventCorrelationConfiguration\b[^>]*>)([\s\S]*?)(<\/flowable:startEventCorrelationConfiguration>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      if (!trimmed) return _m;
-      return `${open}<![CDATA[${trimmed}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Ensure flowable:string body is wrapped in CDATA
-function wrapFlowableStringInCDATA(xml: string): string {
-  try {
-    const re = /(<flowable:string\b[^>]*>)([\s\S]*?)(<\/flowable:string>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      if (!trimmed) return _m;
-      return `${open}<![CDATA[${trimmed}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Ensure flowable:decisionReferenceType body is wrapped in CDATA
-function wrapDecisionReferenceTypeInCDATA(xml: string): string {
-  try {
-    const re = /(<flowable:decisionReferenceType\b[^>]*>)([\s\S]*?)(<\/flowable:decisionReferenceType>)/g;
-    return xml.replace(re, (_m, open, inner, close) => {
-      const already = /<!\[CDATA\[/.test(inner);
-      if (already) return _m;
-      const trimmed = String(inner).trim();
-      if (!trimmed) return _m;
-      return `${open}<![CDATA[${trimmed}]]>${close}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Replace errorEventDefinition@errorRef with the actual errorCode of the referenced bpmn:Error, for Flowable compatibility
-function mapErrorRefToErrorCodeOnExport(xml: string): string {
-  try {
-    // Build map of Error element ID -> errorCode
-    const idToCode = new Map<string, string>();
-    const reError = /<([\w-]+:)?error\b([^>]*)>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = reError.exec(xml))) {
-      const attrs = m[2] || '';
-      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs);
-      const codeMatch = /\berrorCode\s*=\s*"([^"]*)"/i.exec(attrs);
-      if (idMatch && codeMatch) {
-        idToCode.set(idMatch[1], codeMatch[1]);
-      }
-    }
-    if (!idToCode.size) return xml;
-    // Replace errorRef values on errorEventDefinition with code if we have a match
-    const reErrDef = /(<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*")([^"]+)(")/gi;
-    return xml.replace(reErrDef, (full, pre, _ns, ref, post) => {
-      const code = idToCode.get(ref);
-      if (!code) return full;
-      return `${pre}${code}${post}`;
-    });
-  } catch {
-    return xml;
-  }
-}
-
-// Ensure error definitions match errorRef usage:
-// - Remove unreferenced <bpmn:error> elements
-// - For each errorRef without a matching <bpmn:error id="..."> create one
-//   with id=name=errorCode=errorRef value
-function reconcileErrorDefinitionsOnExport(xml: string): string {
-  try {
-    // 1) Collect referenced errorRef values (after we rewrote them to codes)
-    const refs = new Set<string>();
-    const reErrRef = /<([\w-]+:)?errorEventDefinition\b[^>]*\berrorRef\s*=\s*"([^"]+)"/gi;
-    let m: RegExpExecArray | null;
-    while ((m = reErrRef.exec(xml))) {
-      const ref = (m[2] || '').trim();
-      if (ref) refs.add(ref);
-    }
-
-    // 2) Collect existing error IDs
-    const existing = new Set<string>();
-    const collectId = (attrs: string) => {
-      const idMatch = /\bid\s*=\s*"([^"]+)"/i.exec(attrs || '');
-      return idMatch ? idMatch[1] : '';
-    };
-    const reErrSelf = /<([\w-]+:)?error\b([^>]*)\/>/gi;
-    while ((m = reErrSelf.exec(xml))) {
-      const id = collectId(m[2]);
-      if (id) existing.add(id);
-    }
-    const reErrPair = /<([\w-]+:)?error\b([^>]*)>([\s\S]*?)<\/(?:[\w-]+:)?error>/gi;
-    while ((m = reErrPair.exec(xml))) {
-      const id = collectId(m[2]);
-      if (id) existing.add(id);
-    }
-
-    // 3) Remove unreferenced errors
-    const shouldKeep = (attrs: string) => {
-      const id = collectId(attrs);
-      return id && refs.has(id);
-    };
-    let out = xml.replace(reErrSelf, (full, _ns, attrs) => (shouldKeep(attrs) ? full : ''));
-    out = out.replace(reErrPair, (full, _ns, attrs) => (shouldKeep(attrs) ? full : ''));
-
-    // 4) Inject missing errors before </definitions>
-    const missing = Array.from(refs).filter((id) => !existing.has(id));
-    if (missing.length) {
-      const defMatch = /<([\w-]+:)?definitions\b[^>]*>/i.exec(out);
-      const ns = defMatch && defMatch[1] ? defMatch[1] : 'bpmn:';
-      const payload = missing
-        .map((id) => `  <${ns}error id="${id}" name="${id}" errorCode="${id}" />`)
-        .join('\n');
-      const reClose = /(<\/(?:[\w-]+:)?definitions>)/i;
-      if (reClose.test(out)) {
-        out = out.replace(reClose, `${payload}\n$1`);
-      } else {
-        out += `\n${payload}\n`;
-      }
-    }
-
-    return out;
-  } catch {
-    return xml;
-  }
-}
 
 // For ServiceTasks with flowable:type="external-worker", ensure design stencils are written
 // inside extensionElements as required by Flowable Design:
