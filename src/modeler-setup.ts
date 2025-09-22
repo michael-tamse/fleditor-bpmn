@@ -195,17 +195,26 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
 
   try {
     if (state.kind === 'dmn') {
-      if (runWithState) await runWithState(state, () => state.modeler.importXML(prepared));
+      console.log('[Debug] DMN bootstrapState - setting isImporting=true for tab:', state.id);
+      state.isImporting = true;
+      try {
+        if (runWithState) await runWithState(state, () => state.modeler.importXML(prepared));
 
-      const views = state.modeler.getViews();
-      if (views && views.length > 0) {
-        const decisionTableView = views.find((v: any) => v.type === 'decisionTable');
-        if (decisionTableView) {
-          await state.modeler.open(decisionTableView);
+        const views = state.modeler.getViews();
+        if (views && views.length > 0) {
+          const decisionTableView = views.find((v: any) => v.type === 'decisionTable');
+          if (decisionTableView) {
+            await state.modeler.open(decisionTableView);
+          }
         }
-      }
 
-      if (updateDmnTabTitle) setTimeout(() => updateDmnTabTitle(state), 200);
+        if (updateDmnTabTitle) setTimeout(() => updateDmnTabTitle(state), 200);
+      } finally {
+        // Ensure isImporting is always reset, even if something goes wrong
+        console.log('[Debug] DMN bootstrapState - setting isImporting=false for tab:', state.id);
+        state.isImporting = false;
+        state.lastImportTime = Date.now();
+      }
 
     } else {
       if (runWithState) {

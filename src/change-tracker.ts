@@ -91,6 +91,19 @@ export function scheduleDirtyCheck(state: DiagramTabState) {
 }
 
 export function scheduleDirtyCheckDmn(state: DiagramTabState) {
+  const timeSinceImport = state.lastImportTime ? Date.now() - state.lastImportTime : Infinity;
+  console.log('DMN scheduleDirtyCheckDmn called, isImporting:', state.isImporting, 'timeSinceImport:', timeSinceImport, 'tabId:', state.id);
+
+  if (state.isImporting) {
+    console.log('DMN scheduleDirtyCheckDmn: Skipping dirty check during import');
+    return;
+  }
+
+  // Skip dirty check for 2 seconds after import to prevent false positives from initial events
+  if (timeSinceImport < 2000) {
+    console.log('DMN scheduleDirtyCheckDmn: Skipping dirty check - too soon after import (', timeSinceImport, 'ms)');
+    return;
+  }
   if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
   state.dirtyTimer = setTimeout(async () => {
     try {
@@ -145,6 +158,10 @@ export function bindDmnTabEvents(state: DiagramTabState) {
     try {
       const eventBus = activeViewer.get('eventBus');
       const markDirty = debounce(() => {
+        if (state.isImporting) {
+          console.log('DMN Event: Change detected during import - skipping dirty check');
+          return;
+        }
         console.log('DMN Event: Change detected in active viewer');
         scheduleDirtyCheckDmn(state);
       }, 100);
@@ -182,7 +199,9 @@ export function bindDmnTabEvents(state: DiagramTabState) {
 
     state.modeler.on('view.contentChanged', () => {
       console.log('DMN Event: view.contentChanged fired');
-      scheduleDirtyCheckDmn(state);
+      if (!state.isImporting) {
+        scheduleDirtyCheckDmn(state);
+      }
       updateDmnTabTitle(state);
     });
 
@@ -191,11 +210,6 @@ export function bindDmnTabEvents(state: DiagramTabState) {
       bindActiveViewer();
       updateDmnTabTitle(state);
     });
-
-    setTimeout(() => {
-      bindActiveViewer();
-      updateDmnTabTitle(state);
-    }, 100);
 
   } catch (e) {
     console.warn('Failed to bind DMN events:', e);

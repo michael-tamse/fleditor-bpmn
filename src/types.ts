@@ -12,6 +12,7 @@ export interface DiagramTabState {
   baselineHash?: number;
   dirtyTimer?: any;
   isImporting: boolean;
+  lastImportTime?: number;
 }
 
 export interface DiagramInit {
