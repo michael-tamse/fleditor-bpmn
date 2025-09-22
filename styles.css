@@ -150,15 +150,11 @@ html, body { height: 100%; }
   border-radius: 4px !important;
 }
 
-/* DMN / table-js cell editor must float above the grid */
-.dmn-canvas .tjs-cell-editor,
-.dmn-canvas .cell-editor {
-  position: absolute !important;           /* <— entscheidend */
-  z-index: 10000 !important;
-  background: #fff !important;
-  border: 1px solid #007acc !important;
-  outline: none !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,.15) !important;
+/* DMN cell editors - minimal interference */
+.dmn-canvas .tjs-cell-editor {
+  background: white;
+  border: 1px solid #007acc;
+  outline: none;
 }
 .properties {
   height: 100%;
@@ -266,43 +262,8 @@ html, body { height: 100%; }
   display: none !important;
 }
 
-/* === DMN: Minimal fixes, let dmn-js handle styling === */
+/* === DMN: Minimal setup - let dmn-js handle everything === */
 .dmn-canvas {
   position: relative;
-  overflow: visible;
-}
-
-/* DMN Table Layout Fixes */
-.dmn-host .dmn-js-parent {
-  height: 100% !important;
-  overflow: visible !important; /* Wichtig für Header-Editoren */
-}
-
-/* Ensure table containers don't clip overlays */
-.dmn-host .tjs-container,
-.dmn-host .dmn-decision-table-container {
-  overflow: visible !important;
-  position: relative;
-}
-
-/* Fix for cell editor positioning */
-.dmn-host .tjs-cell-editor {
-  position: absolute !important;
-  z-index: 1000;
-  background: white;
-  border: 1px solid #007acc;
-  box-sizing: border-box;
-}
-
-/* Header editor should float above table */
-.dmn-host .tjs-head .tjs-cell-editor,
-.dmn-host .header-cell-editor {
-  z-index: 1001 !important;
-  overflow: visible !important;
-}
-
-/* Ensure table scrolling doesn't interfere */
-.dmn-host .tjs-table-container {
-  position: relative;
-  overflow: visible !important;
+  height: 100%;
 }

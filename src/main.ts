@@ -19,6 +19,8 @@ import flowableModdle from './flowable-moddle';
 import { SidecarBridge } from './sidecar/bridge';
 import { createDomTransport } from './sidecar/transports/dom';
 import DmnJS from 'dmn-js/lib/Modeler';
+// Alternative: Versuche Decision Table Viewer
+// import DecisionTableEditor from 'dmn-js/lib/decision-table/Modeler';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
 import { Tabs } from './bpmn-tabs/tabs';
 
@@ -349,6 +351,7 @@ function scheduleDirtyCheckDmn(state: DiagramTabState) {
   }, 300);
 }
 
+
 function bindModelerEvents(state: DiagramTabState) {
   const eventBus = state.modeler.get('eventBus');
   if (eventBus) {
@@ -382,13 +385,53 @@ function bindDmnTabEvents(state: DiagramTabState) {
   try {
     state.modeler.on('views.changed', () => {
       scheduleDirtyCheckDmn(state);
+      updateDmnTabTitle(state);
     });
 
     state.modeler.on('view.contentChanged', () => {
       scheduleDirtyCheckDmn(state);
+      updateDmnTabTitle(state);
     });
+
+    // Listen for element property changes (like decision ID changes)
+    state.modeler.on('element.changed', () => {
+      updateDmnTabTitle(state);
+    });
+
+    // Initial tab title update (with delay to ensure data is loaded)
+    setTimeout(() => updateDmnTabTitle(state), 100);
   } catch (e) {
     console.warn('Failed to bind DMN events:', e);
+  }
+}
+
+function updateDmnTabTitle(state: DiagramTabState) {
+  if (!tabsControl || !state.id) return;
+
+  try {
+    // Get current active view
+    const activeView = state.modeler.getActiveView();
+    if (!activeView) return;
+
+    // Get the decision element
+    const decision = activeView.element;
+    if (!decision) return;
+
+    // Extract decision ID or name
+    let title = 'DMN Entscheidung';
+
+    if (decision.id) {
+      title = decision.id;
+    } else if (decision.name) {
+      title = decision.name;
+    } else if (decision.$attrs && decision.$attrs.id) {
+      title = decision.$attrs.id;
+    }
+
+    // Update tab title
+    tabsControl.setTitle(state.id, title);
+  } catch (e) {
+    console.warn('Failed to update DMN tab title:', e);
   }
 }
 
@@ -559,6 +602,10 @@ async function bootstrapState(state: DiagramTabState, init: DiagramInit) {
           await state.modeler.open(decisionTableView);
         }
       }
+
+      // Update tab title after import
+      setTimeout(() => updateDmnTabTitle(state), 200);
+
     } else {
       await runWithState(state, () => state.modeler.importXML(prepared));
       runWithState(state, () => {
@@ -624,8 +671,18 @@ function initTabs() {
       const diagramType = pendingTabInits.get(id)?.diagramType || 'bpmn';
 
       const canvas = document.createElement('div');
-      canvas.className = diagramType === 'dmn' ? 'canvas dmn-canvas' : 'canvas';
-      canvas.setAttribute('aria-label', diagramType === 'dmn' ? 'DMN Arbeitsfläche' : 'BPMN Arbeitsfläche');
+      if (diagramType === 'dmn') {
+        canvas.className = 'canvas dmn-canvas';
+        canvas.setAttribute('aria-label', 'DMN Arbeitsfläche');
+        // Spezielle DMN Container-Properties
+        canvas.style.position = 'relative';
+        canvas.style.overflow = 'visible';
+        canvas.style.height = '100%';
+        canvas.style.width = '100%';
+      } else {
+        canvas.className = 'canvas';
+        canvas.setAttribute('aria-label', 'BPMN Arbeitsfläche');
+      }
 
       const props = document.createElement('aside');
       props.className = 'properties';
@@ -636,10 +693,9 @@ function initTabs() {
 
       let instance: any;
       if (diagramType === 'dmn') {
-        // Create DMN instance direkt wie BPMN - ohne Web Component
+        // Create DMN instance mit alternativer Konfiguration
         instance = new DmnJS({
-          container: canvas,
-          keyboard: { bindTo: window }
+          container: canvas
         });
       } else {
         instance = new BpmnModeler({
