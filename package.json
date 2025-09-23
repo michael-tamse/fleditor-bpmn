@@ -21,11 +21,18 @@
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-fs": "^2.4.2",
     "bpmn-js": "^11.0.0",
-    "bpmn-js-properties-panel": "^1.26.0"
+    "bpmn-js-properties-panel": "^1.26.0",
+    "dmn-js": "^17.4.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
-    "typescript": "^5.4.0",
+    "minimist": "^1.2.8",
+    "ts-morph": "^27.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
     "vite": "^7.1.5"
+  },
+  "overrides": {
+    "@bpmn-io/feel-editor": "^1.12.0"
   }
 }

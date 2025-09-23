@@ -11,7 +11,7 @@ interface TabEvents {
   onClose?(id: TabId): Promise<boolean> | boolean;     // return false, um Schließen zu verhindern
   onCreatePanel?(id: TabId, panelEl: HTMLElement): void;
   onDestroyPanel?(id: TabId, panelEl: HTMLElement): void;
-  onAddRequest?(): void;
+  onAddRequest?(kind: 'bpmn' | 'dmn' | 'event'): void;
 }
 
 export class Tabs {
@@ -21,6 +21,7 @@ export class Tabs {
   private leftBtn: HTMLButtonElement;
   private rightBtn: HTMLButtonElement;
   private addBtn: HTMLButtonElement | null;
+  private addMenu: HTMLElement | null;
   private ro: ResizeObserver;
   private currentId: TabId | null = null;
   private menu: HTMLElement | null = null;
@@ -32,7 +33,8 @@ export class Tabs {
     this.panels  = root.querySelector('.panels')!;
     this.leftBtn = root.querySelector('.scroll-btn.left') as HTMLButtonElement;
     this.rightBtn= root.querySelector('.scroll-btn.right') as HTMLButtonElement;
-    this.addBtn  = root.querySelector('.add-tab') as HTMLButtonElement | null;
+    this.addBtn  = root.querySelector('.add-new') as HTMLButtonElement | null;
+    this.addMenu = root.querySelector('.add-menu') as HTMLElement | null;
 
     this.bind();
     this.ro = new ResizeObserver(() => this.updateOverflow());
@@ -238,7 +240,17 @@ export class Tabs {
     // Scroll buttons
     this.leftBtn.addEventListener('click', () => this.smoothStep(-1));
     this.rightBtn.addEventListener('click', () => this.smoothStep(+1));
-    this.addBtn?.addEventListener('click', () => this.events.onAddRequest?.());
+    this.addBtn?.addEventListener('click', () => this.toggleAddMenu());
+
+    // Add menu handlers
+    this.addMenu?.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const kind = target.getAttribute('data-kind') as 'bpmn' | 'dmn' | 'event';
+      if (kind) {
+        this.hideAddMenu();
+        this.events.onAddRequest?.(kind);
+      }
+    });
 
     // Resize updates
     window.addEventListener('resize', () => this.updateOverflowSoon());
@@ -316,9 +328,15 @@ export class Tabs {
       }
     });
 
-    document.addEventListener('click', () => this.hideContextMenu());
+    document.addEventListener('click', (e) => {
+      this.hideContextMenu();
+      // Hide add menu if clicking outside
+      if (!this.addBtn?.contains(e.target as Node) && !this.addMenu?.contains(e.target as Node)) {
+        this.hideAddMenu();
+      }
+    });
     document.addEventListener('contextmenu', () => this.hideContextMenu());
-    window.addEventListener('blur', () => this.hideContextMenu());
+    window.addEventListener('blur', () => { this.hideContextMenu(); this.hideAddMenu(); });
   }
 
   private openContextMenu(evt: MouseEvent, id: TabId) {
@@ -345,5 +363,21 @@ export class Tabs {
     if (!this.menu) return;
     this.menuTarget = null;
     this.menu.classList.remove('open');
+  }
+
+  private toggleAddMenu() {
+    if (!this.addMenu) return;
+    const isOpen = this.addMenu.classList.contains('open');
+    if (isOpen) {
+      this.hideAddMenu();
+    } else {
+      this.hideContextMenu();
+      this.addMenu.classList.add('open');
+    }
+  }
+
+  private hideAddMenu() {
+    if (!this.addMenu) return;
+    this.addMenu.classList.remove('open');
   }
 }

@@ -68,6 +68,33 @@ function isTauri(): boolean {
       return m ? m[2] : null;
     } catch { return null; }
   }
+
+  function deriveDmnId(xml: string): string | null {
+    try {
+      if (!xml || typeof xml !== 'string') {
+        return null;
+      }
+      // Try multiple patterns for decision ID
+      const patterns = [
+        /<([\w-]+:)?decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+        /<([\w-]+:)?decision\b[^>]*\bid\s*=\s*'([^']+)'/i,
+        /<decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+        /<dmn:decision\b[^>]*\bid\s*=\s*"([^"]+)"/i,
+        /<([\w-]+:)?decision\b[^>]*\bname\s*=\s*"([^"]+)"/i,
+        /<([\w-]+:)?definitions\b[^>]*\bid\s*=\s*"([^"]+)"/i
+      ];
+      for (const pattern of patterns) {
+        const match = pattern.exec(xml);
+        if (match) {
+          return match[2] || match[1];
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   function sanitizeFileName(name: string): string {
     return name.replace(/[\\/:*?"<>|\n\r]+/g, '_');
   }
@@ -162,11 +189,28 @@ function isTauri(): boolean {
       const xml = String(payload?.xml ?? '');
       if (!xml) return { ok: false };
       // save dialog + write file via Tauri v2 APIs
-      const pid = deriveProcessId(xml);
-      const suggested = sanitizeFileName((pid || 'diagram') + '.bpmn20.xml');
+      const diagramType = payload?.diagramType || 'bpmn';
+      let id: string | null;
+      let extension: string;
+      let filterName: string;
+      let extensions: string[];
+
+      if (diagramType === 'dmn') {
+        id = deriveDmnId(xml);
+        extension = '.dmn';
+        filterName = 'DMN';
+        extensions = ['dmn', 'xml'];
+      } else {
+        id = deriveProcessId(xml);
+        extension = '.bpmn20.xml';
+        filterName = 'BPMN';
+        extensions = ['bpmn', 'xml'];
+      }
+
+      const suggested = sanitizeFileName((id || 'diagram') + extension);
       const filePath = await save({
         defaultPath: suggested,
-        filters: [ { name: 'BPMN', extensions: ['bpmn', 'xml'] } ]
+        filters: [ { name: filterName, extensions } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.save canceled'); return { ok: false, canceled: true }; }
       await writeTextFile(filePath as string, xml);
@@ -185,7 +229,11 @@ function isTauri(): boolean {
     try {
       // open dialog + read file via Tauri v2 APIs
       const sel = await open({
-        filters: [ { name: 'BPMN', extensions: ['bpmn', 'xml'] } ],
+        filters: [
+          { name: 'BPMN', extensions: ['bpmn', 'bpmn20.xml'] },
+          { name: 'DMN', extensions: ['dmn'] },
+          { name: 'XML', extensions: ['xml'] }
+        ],
         multiple: false
       });
       const path = Array.isArray(sel) ? sel[0] : sel;
