@@ -2,7 +2,7 @@ import BpmnModeler from 'bpmn-js/lib/Modeler';
 import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js-properties-panel';
 import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
-import DmnJS from 'dmn-js/lib/Modeler';
+import { createFlowableDmnModeler } from './dmn/dmn-factory';
 import { Tabs } from './bpmn-tabs/tabs';
 import { updateEmptyStateVisibility, showConfirmDialog } from './ui-controls';
 
@@ -264,7 +264,7 @@ export function initTabs() {
 
       let instance: any;
       if (kind === 'dmn') {
-        instance = new DmnJS({
+        instance = createFlowableDmnModeler({
           container: canvas
         });
       } else {

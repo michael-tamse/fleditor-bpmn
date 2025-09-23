@@ -1,5 +1,4 @@
-import DmnJS from 'dmn-js/lib/Modeler';
-import FlowableAutocompleteModule from './dmn/flowable-autocomplete';
+import { createFlowableDmnModeler } from './dmn/dmn-factory';
 
 // CSS als Strings importieren für Shadow DOM
 import decisionTableCss from 'dmn-js/dist/assets/dmn-js-decision-table.css?inline';
@@ -64,24 +63,12 @@ export class DmnTab extends HTMLElement {
 
   private initializeModeler() {
     try {
-      // DMN-js Modeler initialisieren mit Flowable Support
-      this.modeler = new DmnJS({
+      // DMN-js Modeler initialisieren mit Flowable Support über Factory
+      this.modeler = createFlowableDmnModeler({
         container: this.host,
         keyboard: { bindTo: window },
-        // Zusätzliche Config für besseres Layout
         width: '100%',
-        height: '100%',
-        // Flowable-spezifische Konfiguration
-        decisionTable: {
-          additionalModules: [ FlowableAutocompleteModule ]
-        },
-        literalExpression: {
-          additionalModules: [ FlowableAutocompleteModule ]
-        },
-        // JUEL als Standard-Sprache für Flowable
-        defaultInputExpressionLanguage: 'juel',
-        defaultOutputExpressionLanguage: 'juel',
-        defaultLiteralExpressionLanguage: 'juel'
+        height: '100%'
       });
 
       // XML importieren falls bereits gesetzt
@@ -132,6 +119,36 @@ export class DmnTab extends HTMLElement {
     }
   }
 
+  private forceJuelExpressionLanguage(xml: string): string {
+    // Robust genug für dmn: oder ohne Prefix - überall JUEL erzwingen
+
+    // 1. <definitions ...> - mit oder ohne Namespace-Prefix
+    xml = xml.replace(
+      /<([a-zA-Z0-9_:]*definitions)([^>]*)>/,
+      (match, tag, attrs) => /expressionLanguage=/.test(attrs)
+        ? match.replace(/expressionLanguage="[^"]*"/, 'expressionLanguage="juel"')
+        : `<${tag}${attrs} expressionLanguage="juel">`
+    );
+
+    // 2. <inputExpression ...> und <literalExpression ...> - überall JUEL setzen
+    xml = xml.replace(
+      /<(?:[a-zA-Z0-9_]*:)?(inputExpression|literalExpression)([^>]*)>/g,
+      (match, tag, attrs) => /expressionLanguage=/.test(attrs)
+        ? match.replace(/expressionLanguage="[^"]*"/, 'expressionLanguage="juel"')
+        : match.replace(/>$/, ' expressionLanguage="juel">')
+    );
+
+    // 3. Auch outputEntry und inputEntry für Vollständigkeit
+    xml = xml.replace(
+      /<(?:[a-zA-Z0-9_]*:)?(outputEntry|inputEntry)([^>]*)>/g,
+      (match, tag, attrs) => /expressionLanguage=/.test(attrs)
+        ? match.replace(/expressionLanguage="[^"]*"/, 'expressionLanguage="juel"')
+        : match.replace(/>$/, ' expressionLanguage="juel">')
+    );
+
+    return xml;
+  }
+
   async import(xml: string) {
     this._xml = xml;
     if (!this.modeler) {
@@ -140,7 +157,9 @@ export class DmnTab extends HTMLElement {
     }
 
     try {
-      await this.modeler.importXML(xml);
+      // XML vor Import auf JUEL zwingen
+      const juelXml = this.forceJuelExpressionLanguage(xml);
+      await this.modeler.importXML(juelXml);
 
       // Nach Import automatisch zur Decision Table View wechseln
       const views = this.modeler.getViews();

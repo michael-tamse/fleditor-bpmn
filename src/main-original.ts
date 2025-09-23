@@ -18,7 +18,7 @@ import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
 import { SidecarBridge } from './sidecar/bridge';
 import { createDomTransport } from './sidecar/transports/dom';
-import DmnJS from 'dmn-js/lib/Modeler';
+import { createFlowableDmnModeler } from './dmn/dmn-factory';
 // Alternative: Versuche Decision Table Viewer
 // import DecisionTableEditor from 'dmn-js/lib/decision-table/Modeler';
 import { createPostMessageTransport } from './sidecar/transports/postMessage';
@@ -799,7 +799,7 @@ function initTabs() {
       let instance: any;
       if (kind === 'dmn') {
         // Create DMN instance mit alternativer Konfiguration
-        instance = new DmnJS({
+        instance = createFlowableDmnModeler({
           container: canvas
         });
       } else {

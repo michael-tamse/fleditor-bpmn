@@ -402,3 +402,8 @@ html, body { height: 100%; }
   font-size: 12px;
   color: var(--muted);
 }
+
+/* Hide FEEL expression language selector in DMN editor */
+.dmn-expression-language {
+  display: none !important;
+}
