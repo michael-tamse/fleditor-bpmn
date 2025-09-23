@@ -121,15 +121,23 @@ export function deriveDmnDecisionIdFromModel(): string | null {
 
 export function createInitialDmnXmlWithDecisionId(decisionId: string): string {
   const initialDmnXml = `<?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_1" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.25.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.5.0">
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" id="Definitions_1" name="DRD" namespace="http://flowable.org/dmn" exporter="Flowable Modeler" exporterVersion="1.0" expressionLanguage="juel">
   <decision id="Decision_1" name="Decision 1">
-    <decisionTable id="DecisionTable_1">
+    <decisionTable id="DecisionTable_1" hitPolicy="FIRST">
       <input id="Input_1" label="Input">
-        <inputExpression id="InputExpression_1" typeRef="string">
+        <inputExpression id="InputExpression_1" typeRef="string" expressionLanguage="juel">
           <text></text>
         </inputExpression>
       </input>
       <output id="Output_1" label="Output" typeRef="string" />
+      <rule id="Rule_1">
+        <inputEntry id="UnaryTests_1">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_1">
+          <text></text>
+        </outputEntry>
+      </rule>
     </decisionTable>
   </decision>
 </definitions>`;

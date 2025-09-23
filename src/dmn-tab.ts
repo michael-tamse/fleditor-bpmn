@@ -1,4 +1,5 @@
 import DmnJS from 'dmn-js/lib/Modeler';
+import FlowableAutocompleteModule from './dmn/flowable-autocomplete';
 
 // CSS als Strings importieren für Shadow DOM
 import decisionTableCss from 'dmn-js/dist/assets/dmn-js-decision-table.css?inline';
@@ -63,13 +64,24 @@ export class DmnTab extends HTMLElement {
 
   private initializeModeler() {
     try {
-      // DMN-js Modeler initialisieren - exakt wie im Official Example
+      // DMN-js Modeler initialisieren mit Flowable Support
       this.modeler = new DmnJS({
         container: this.host,
         keyboard: { bindTo: window },
         // Zusätzliche Config für besseres Layout
         width: '100%',
-        height: '100%'
+        height: '100%',
+        // Flowable-spezifische Konfiguration
+        decisionTable: {
+          additionalModules: [ FlowableAutocompleteModule ]
+        },
+        literalExpression: {
+          additionalModules: [ FlowableAutocompleteModule ]
+        },
+        // JUEL als Standard-Sprache für Flowable
+        defaultInputExpressionLanguage: 'juel',
+        defaultOutputExpressionLanguage: 'juel',
+        defaultLiteralExpressionLanguage: 'juel'
       });
 
       // XML importieren falls bereits gesetzt
