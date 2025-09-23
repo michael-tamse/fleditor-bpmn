@@ -249,12 +249,23 @@ export async function openXmlConsideringDuplicates(xml: string, fileName?: strin
 }
 
 export function detectDiagramType(xml: string): 'bpmn' | 'dmn' {
+  // Zuerst prüfen ob es explizit BPMN ist
+  if (xml.includes('xmlns="http://www.omg.org/spec/BPMN/') ||
+      xml.includes('BPMN/20100524/MODEL') ||
+      xml.includes('<process') ||
+      xml.includes('bpmn:process')) {
+    return 'bpmn';
+  }
+
+  // Dann prüfen ob es DMN ist
   if (xml.includes('dmn:definitions') ||
-      xml.includes('<definitions') && xml.includes('dmn') ||
+      xml.includes('xmlns="https://www.omg.org/spec/DMN/') ||
+      xml.includes('DMN/20191111/MODEL') ||
       xml.includes('<decision') ||
       xml.includes('dmn:decision')) {
     return 'dmn';
   }
+
   return 'bpmn';
 }
 

@@ -407,3 +407,8 @@ html, body { height: 100%; }
 .dmn-expression-language {
   display: none !important;
 }
+
+/* Hide "View DRD" button in DMN decision table */
+.dmn-decision-table-container .view-drd {
+  display: none !important;
+}
