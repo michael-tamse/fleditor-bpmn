@@ -1,7 +1,5 @@
 // Central factory for creating DmnJS instances with consistent Flowable/JUEL configuration
 import DmnJS from 'dmn-js/lib/Modeler';
-import FlowableAutocompleteModule from './flowable-autocomplete';
-import { JuelOnlyModule } from './juel-only-expression-languages';
 
 export interface DmnModelerConfig {
   container: string | Element;
@@ -43,10 +41,10 @@ export function createFlowableDmnModeler(config: DmnModelerConfig) {
 
     // Flowable-spezifische Module
     decisionTable: {
-      additionalModules: [ FlowableAutocompleteModule, JuelOnlyModule ]
+      additionalModules: [  ]
     },
     literalExpression: {
-      additionalModules: [ FlowableAutocompleteModule, JuelOnlyModule ]
+      additionalModules: [  ]
     },
 
     // JUEL als Standard-Sprache für Flowable
