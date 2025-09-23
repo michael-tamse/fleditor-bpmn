@@ -4,7 +4,7 @@ import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
 import { createFlowableDmnModeler } from './dmn/dmn-factory';
 import { Tabs } from './bpmn-tabs/tabs';
-import { updateEmptyStateVisibility, showConfirmDialog } from './ui-controls';
+import { updateEmptyStateVisibility, showConfirmDialog, updateZoomButtonsVisibility } from './ui-controls';
 
 import { DiagramTabState, DiagramInit } from './types';
 
@@ -73,6 +73,7 @@ export function setActiveTab(id: string | null) {
     activeTabState = null;
     modeler = null;
     updateToolbarButtons(null);
+    updateZoomButtonsVisibility();
     persistActiveTab(null);
     return;
   }
@@ -86,6 +87,7 @@ export function setActiveTab(id: string | null) {
 
   // Update toolbar buttons based on active tab type
   updateToolbarButtons(state);
+  updateZoomButtonsVisibility();
 
   try {
     state.modeler.get('canvas').resized();

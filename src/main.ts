@@ -38,6 +38,7 @@ import {
   setPropertyPanelVisible,
   getMenubarVisible,
   getPropertyPanelVisible,
+  updateZoomButtonsVisibility,
   setModeler as setUIModeler,
   setTabStates as setUITabStates
 } from './ui-controls';
@@ -280,6 +281,7 @@ function initializeModules() {
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   updateEmptyStateVisibility();
+  updateZoomButtonsVisibility();
 
   // Initialize modules after tabs are ready
   setTimeout(() => {

@@ -125,20 +125,52 @@ export function setPropertyPanelVisible(visible: boolean) {
 }
 
 export function zoom(delta: number) {
-  if (!modeler) return;
-  const canvas = modeler.get('canvas');
+  const activeState = getActiveState();
+  if (!activeState || !activeState.modeler) return;
+  const canvas = activeState.modeler.get('canvas');
   const current = canvas.zoom();
   canvas.zoom(Math.max(0.2, Math.min(4, current + delta)));
 }
 
 export function zoomReset() {
-  if (!modeler) return;
-  modeler.get('canvas').zoom(1);
+  const activeState = getActiveState();
+  if (!activeState || !activeState.modeler) return;
+  activeState.modeler.get('canvas').zoom(1);
 }
 
 export function fitViewport() {
-  if (!modeler) return;
-  modeler.get('canvas').zoom('fit-viewport', 'auto');
+  const activeState = getActiveState();
+  if (!activeState || !activeState.modeler) return;
+  activeState.modeler.get('canvas').zoom('fit-viewport', 'auto');
+}
+
+function getActiveState() {
+  return (window as any).getActiveState?.();
+}
+
+export function updateZoomButtonsVisibility() {
+  const activeState = getActiveState();
+  const zoomButtons = [
+    document.querySelector('#btn-zoom-in'),
+    document.querySelector('#btn-zoom-out'),
+    document.querySelector('#btn-zoom-reset'),
+    document.querySelector('#btn-fit')
+  ];
+
+  const shouldShow = activeState && activeState.kind === 'bpmn';
+
+  zoomButtons.forEach(btn => {
+    if (btn) {
+      (btn as HTMLElement).style.display = shouldShow ? '' : 'none';
+    }
+  });
+
+  // Also hide/show the divider before zoom buttons
+  const dividers = document.querySelectorAll('.toolbar__right .divider');
+  if (dividers.length > 0) {
+    const lastDivider = dividers[dividers.length - 1] as HTMLElement;
+    lastDivider.style.display = shouldShow ? '' : 'none';
+  }
 }
 
 export function getMenubarVisible(): boolean {
