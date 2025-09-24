@@ -22,6 +22,7 @@ export interface DiagramInit {
   statusMessage?: string;
   activate?: boolean;
   kind?: 'bpmn' | 'dmn' | 'event';
+  eventModel?: any; // For event-specific initialization data
 }
 
 export interface SidecarBridge {

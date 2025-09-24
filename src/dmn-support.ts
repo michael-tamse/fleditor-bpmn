@@ -3,6 +3,15 @@ import { DiagramTabState } from './types';
 let tabsControl: any = null;
 let modeler: any = null;
 
+// Per-tab sync timers for debouncing
+const syncTimerByTab = new WeakMap<DiagramTabState, any>();
+
+// Per-tab locks to prevent sync during ID updates
+const updatingIdByTab = new WeakMap<DiagramTabState, boolean>();
+
+// Per-tab tracking of last known name to detect actual changes
+const lastKnownNameByTab = new WeakMap<DiagramTabState, string>();
+
 export function setTabsControl(control: any) {
   tabsControl = control;
 }
@@ -12,36 +21,78 @@ export function setModeler(m: any) {
 }
 
 export function syncDmnDecisionIdWithName(state: DiagramTabState) {
-  if (!state.modeler) return;
+  // Only run for DMN tabs
+  if (state.kind !== 'dmn' || !state.modeler) return;
+
+  // Don't sync if we're currently updating the ID for this tab (prevents circular updates)
+  if (updatingIdByTab.get(state)) {
+    return;
+  }
+
+  // Clear any pending sync operation for this tab
+  const existingTimer = syncTimerByTab.get(state);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  // Use longer debounce time to allow user to finish typing
+  const timer = setTimeout(() => {
+    performDmnSync(state);
+  }, 500);
+  syncTimerByTab.set(state, timer);
+}
+
+function performDmnSync(state: DiagramTabState) {
+  if (state.kind !== 'dmn' || !state.modeler) return;
 
   try {
     const activeView = state.modeler.getActiveView();
     if (!activeView || !activeView.element) return;
 
     const decision = activeView.element;
-    if (!decision || !decision.name) return;
+    if (!decision) return;
 
-    const currentName = String(decision.name).trim();
+    const currentName = (decision.name || '').trim();
     const currentId = String(decision.id || '');
 
-    // Only sync if name is different from ID and name is not empty
+    // Early exits
+    if (updatingIdByTab.get(state)) return;
+    if (lastKnownNameByTab.get(state) === currentName) return;
     if (!currentName || currentName === currentId) return;
 
     // Create a sanitized ID from the name
-    const sanitizedId = currentName
+    const base = currentName
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .replace(/^[^a-zA-Z_]/, '_')
       .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '') || 'Decision_1';
+      .replace(/^_|_$/g, '');
 
-    // Update the decision ID to match the name
-    if (decision.id !== sanitizedId) {
-      console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${sanitizedId}"`);
-      decision.id = sanitizedId;
+    // Check for ID collisions using ElementRegistry
+    const elementRegistry = state.modeler.get('elementRegistry');
+    let newId = base || 'Decision_1';
+    if (elementRegistry?.get(newId)) {
+      let i = 2;
+      while (elementRegistry.get(`${base}_${i}`)) i++;
+      newId = `${base}_${i}`;
+    }
 
-      // Also update $attrs if it exists
-      if (decision.$attrs) {
-        decision.$attrs.id = sanitizedId;
+    // Update ID via Modeling API (not direct mutation)
+    if (decision.id !== newId) {
+      console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${newId}"`);
+
+      const viewer = state.modeler.getActiveViewer();
+      const modeling = viewer?.get('modeling');
+      if (!modeling) return;
+
+      // Set lock to prevent circular updates for this tab
+      updatingIdByTab.set(state, true);
+
+      try {
+        modeling.updateProperties(decision, { id: newId });
+        lastKnownNameByTab.set(state, currentName);
+      } finally {
+        // Clear lock after a short delay to allow events to settle
+        setTimeout(() => updatingIdByTab.set(state, false), 50);
       }
     }
   } catch (e) {
@@ -51,37 +102,21 @@ export function syncDmnDecisionIdWithName(state: DiagramTabState) {
 
 export function updateDmnTabTitle(state: DiagramTabState) {
   if (!tabsControl || !state.id) {
-    console.log('DMN Tab Title: Missing tabsControl or state.id');
     return;
   }
 
   try {
-    console.log('DMN Tab Title: Updating for state:', state.id);
-
     const activeView = state.modeler.getActiveView();
-    console.log('DMN Tab Title: Active view:', activeView);
-
     if (!activeView) {
-      console.log('DMN Tab Title: No active view');
       return;
     }
 
     const decision = activeView.element;
-    console.log('DMN Tab Title: Decision element:', decision);
-
     if (!decision) {
-      console.log('DMN Tab Title: No decision element');
       return;
     }
 
     let title = 'DMN Entscheidung';
-
-    console.log('DMN Tab Title: Decision properties:', {
-      id: decision.id,
-      name: decision.name,
-      $attrs: decision.$attrs,
-      keys: Object.keys(decision)
-    });
 
     if (decision.name && decision.name.trim()) {
       title = decision.name.trim();
@@ -91,7 +126,6 @@ export function updateDmnTabTitle(state: DiagramTabState) {
       title = decision.$attrs.id;
     }
 
-    console.log('DMN Tab Title: Setting title to:', title);
     tabsControl.setTitle(state.id, title);
   } catch (e) {
     console.warn('Failed to update DMN tab title:', e);

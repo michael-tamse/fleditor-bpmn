@@ -40,9 +40,18 @@ function isTauri(): boolean {
       while (externalOpenQueue.length) {
         const item = externalOpenQueue.shift()!;
         try {
-          try { console.debug('[tauri-host]', 'flushExternalQueue: forwarding to component', { fileName: item.fileName, size: item.xml.length }); } catch {}
+          const hasXml = !!(item as any).xml;
+          const hasJson = !!(item as any).json;
+          const content = hasXml ? (item as any).xml : (item as any).json;
+
+          try { console.debug('[tauri-host]', 'flushExternalQueue: forwarding to component', { fileName: item.fileName, size: content.length, type: hasXml ? 'xml' : 'json' }); } catch {}
           setHostStatus(`forwarding ${item.fileName}…`);
-          const res: any = await host.request('doc.openExternal', { xml: item.xml, fileName: item.fileName }, 120000);
+
+          const requestData = hasXml
+            ? { xml: content, fileName: item.fileName }
+            : { json: content, fileName: item.fileName };
+
+          const res: any = await host.request('doc.openExternal', requestData, 120000);
           try { console.debug('[tauri-host]', 'flushExternalQueue: component replied', { ok: !!(res && res.ok) }); } catch {}
           setHostStatus(`component replied: ${res && res.ok ? 'ok' : 'not ok'}`);
         } catch {
@@ -59,6 +68,13 @@ function isTauri(): boolean {
     externalOpenQueue.push({ xml, fileName });
     try { console.debug('[tauri-host]', 'enqueueExternal', { fileName, size: xml.length, queued: externalOpenQueue.length, handshakeSeen }); } catch {}
     setHostStatus(`queued ${fileName} (${xml.length} bytes)`);
+    flushExternalQueue();
+  }
+
+  function enqueueExternalEvent(json: string, fileName: string) {
+    externalOpenQueue.push({ json, fileName });
+    try { console.debug('[tauri-host]', 'enqueueExternalEvent', { fileName, size: json.length, queued: externalOpenQueue.length, handshakeSeen }); } catch {}
+    setHostStatus(`queued event ${fileName} (${json.length} bytes)`);
     flushExternalQueue();
   }
 
@@ -184,27 +200,47 @@ function isTauri(): boolean {
   // Implement doc.save -> native save dialog + write file
   host.onRequest('doc.save', async (payload: any) => {
     try {
-      console.debug('[tauri-host]', 'doc.save request', { size: String(payload?.xml || '').length });
+      console.debug('[tauri-host]', 'doc.save request', { size: String(payload?.xml || payload?.json || '').length });
       if (!isTauri()) return { ok: false };
-      const xml = String(payload?.xml ?? '');
-      if (!xml) return { ok: false };
-      // save dialog + write file via Tauri v2 APIs
+
       const diagramType = payload?.diagramType || 'bpmn';
+      let content: string;
       let id: string | null;
       let extension: string;
       let filterName: string;
       let extensions: string[];
 
-      if (diagramType === 'dmn') {
-        id = deriveDmnId(xml);
-        extension = '.dmn';
-        filterName = 'DMN';
-        extensions = ['dmn', 'xml'];
+      if (diagramType === 'event') {
+        // Handle event JSON files
+        content = String(payload?.json ?? '');
+        if (!content) return { ok: false };
+
+        // Extract event key for filename
+        try {
+          const eventData = JSON.parse(content);
+          id = eventData.key || 'event';
+        } catch {
+          id = 'event';
+        }
+        extension = '.event';
+        filterName = 'Event';
+        extensions = ['event', 'json'];
       } else {
-        id = deriveProcessId(xml);
-        extension = '.bpmn20.xml';
-        filterName = 'BPMN';
-        extensions = ['bpmn', 'xml'];
+        // Handle XML files (BPMN/DMN)
+        content = String(payload?.xml ?? '');
+        if (!content) return { ok: false };
+
+        if (diagramType === 'dmn') {
+          id = deriveDmnId(content);
+          extension = '.dmn';
+          filterName = 'DMN';
+          extensions = ['dmn', 'xml'];
+        } else {
+          id = deriveProcessId(content);
+          extension = '.bpmn20.xml';
+          filterName = 'BPMN';
+          extensions = ['bpmn', 'xml'];
+        }
       }
 
       const suggested = sanitizeFileName((id || 'diagram') + extension);
@@ -213,7 +249,7 @@ function isTauri(): boolean {
         filters: [ { name: filterName, extensions } ]
       });
       if (!filePath) { console.debug('[tauri-host]', 'doc.save canceled'); return { ok: false, canceled: true }; }
-      await writeTextFile(filePath as string, xml);
+      await writeTextFile(filePath as string, content);
       console.debug('[tauri-host]', 'doc.save ok', { path: filePath });
       return { ok: true, path: filePath };
     } catch (e: any) {
@@ -232,17 +268,26 @@ function isTauri(): boolean {
         filters: [
           { name: 'BPMN', extensions: ['bpmn', 'bpmn20.xml'] },
           { name: 'DMN', extensions: ['dmn'] },
+          { name: 'Event', extensions: ['event'] },
           { name: 'XML', extensions: ['xml'] }
         ],
         multiple: false
       });
       const path = Array.isArray(sel) ? sel[0] : sel;
       if (!path) { try { console.debug('[tauri-host]', 'doc.load canceled'); } catch {} return { canceled: true } as any; }
-      const xml = await readTextFile(path as string);
+
+      const content = await readTextFile(path as string);
       const parts = String(path).split(/[\/\\]/);
       const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
-      try { console.debug('[tauri-host]', 'doc.load ok', { path }); } catch {}
-      return { xml: String(xml ?? ''), fileName } as any;
+
+      try { console.debug('[tauri-host]', 'doc.load ok', { path, fileName }); } catch {}
+
+      // Check if it's an event file and return appropriate format
+      if (fileName.toLowerCase().endsWith('.event')) {
+        return { json: String(content ?? ''), fileName } as any;
+      } else {
+        return { xml: String(content ?? ''), fileName } as any;
+      }
     } catch (e) {
       try { console.debug('[tauri-host]', 'doc.load error', e); } catch {}
       return '';
@@ -280,12 +325,18 @@ function isTauri(): boolean {
       setHostStatus(`open-files event: ${paths.length}`);
       for (const p of paths) {
         try {
-          const xml = await readTextFile(p);
+          const content = await readTextFile(p);
           const parts = String(p).split(/[/\\]/);
           const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
-          try { console.debug('[tauri-host]', 'open-files: read file', { path: p, fileName, size: xml.length }); } catch {}
-          setHostStatus(`read ${fileName} (${xml.length} bytes)`);
-          enqueueExternal(xml, fileName);
+          try { console.debug('[tauri-host]', 'open-files: read file', { path: p, fileName, size: content.length }); } catch {}
+          setHostStatus(`read ${fileName} (${content.length} bytes)`);
+
+          // Check if it's an event file and handle appropriately
+          if (fileName.toLowerCase().endsWith('.event')) {
+            enqueueExternalEvent(content, fileName);
+          } else {
+            enqueueExternal(content, fileName);
+          }
         } catch (e) {
           try { console.debug('[tauri-host]', 'failed to open file', p, e); } catch {}
           setHostStatus(`failed to read ${String(p)}: ${String((e as any)?.message || e)}`);

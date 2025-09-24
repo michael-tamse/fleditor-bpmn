@@ -249,6 +249,11 @@ export function setupModelerForState(state: DiagramTabState) {
     return;
   }
 
+  if (state.kind === 'event') {
+    // Event tabs don't need modeler setup - they use a custom editor
+    return;
+  }
+
   const runWithState = (window as any).runWithState;
   if (runWithState) {
     runWithState(state, () => {

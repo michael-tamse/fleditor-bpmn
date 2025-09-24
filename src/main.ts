@@ -156,15 +156,31 @@ function initSidecar() {
     sidecar.onRequest('doc.openExternal', async (p: any) => {
       try {
         const xml = String(p?.xml ?? '');
-        if (!xml.trim()) return { ok: false };
+        const json = String(p?.json ?? '');
+
+        if (!xml.trim() && !json.trim()) return { ok: false };
+
         const { sanitizeFileName } = await import('./bpmn-xml-utils');
         const fileName = typeof p?.fileName === 'string' ? sanitizeFileName(p.fileName) : undefined;
-        debug('open-external: received from host', { fileName, size: xml.length });
-        try {
-          setStatus(fileName ? `Host: Datei empfangen – ${fileName}` : 'Host: Datei empfangen');
-        } catch {}
-        const { openXmlConsideringDuplicates } = await import('./file-operations');
-        await openXmlConsideringDuplicates(xml, fileName, 'host');
+
+        if (json.trim()) {
+          // Handle event JSON files
+          debug('open-external: received event JSON from host', { fileName, size: json.length });
+          try {
+            setStatus(fileName ? `Host: Event-Datei empfangen – ${fileName}` : 'Host: Event-Datei empfangen');
+          } catch {}
+          const { openEventFile } = await import('./file-operations');
+          await openEventFile(json, fileName || 'event.event', 'host');
+        } else {
+          // Handle XML files (BPMN/DMN)
+          debug('open-external: received XML from host', { fileName, size: xml.length });
+          try {
+            setStatus(fileName ? `Host: Datei empfangen – ${fileName}` : 'Host: Datei empfangen');
+          } catch {}
+          const { openXmlConsideringDuplicates } = await import('./file-operations');
+          await openXmlConsideringDuplicates(xml, fileName, 'host');
+        }
+
         return { ok: true };
       } catch (e: any) {
         debug('open-external: error', String(e?.message || e));
@@ -252,6 +268,7 @@ function initializeModules() {
   (window as any).bootstrapState = bootstrapState;
   (window as any).setupModelerForState = setupModelerForState;
   (window as any).updateBaseline = updateBaseline;
+  (window as any).setDirtyState = setDirtyState;
   (window as any).updateDmnTabTitle = updateDmnTabTitle;
   (window as any).syncDmnDecisionIdWithName = syncDmnDecisionIdWithName;
   (window as any).openFileIntoState = async (file: File, state: any) => {

@@ -55,16 +55,33 @@ export function hashString(s: string) {
 
 export async function updateBaseline(state: DiagramTabState) {
   try {
-    const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
-    state.baselineHash = hashString(xml);
-
+    let content: string;
     let derivedTitle: string | null;
-    if (state.kind === 'dmn') {
-      // DMN title derivation handled by DMN support module
-      derivedTitle = null;
+
+    if (state.kind === 'event') {
+      // For event tabs, get JSON content and update baseline in event editor
+      const eventModel = await runWithState(state, () => state.modeler.getModel());
+      content = JSON.stringify(eventModel, null, 2);
+      derivedTitle = eventModel.name || eventModel.key || state.title;
+
+      // Update baseline in the event editor instance
+      if (state.modeler && typeof state.modeler.updateBaseline === 'function') {
+        state.modeler.updateBaseline();
+      }
     } else {
-      derivedTitle = getIdForState(state);
+      // For BPMN/DMN tabs, get XML content
+      const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
+      content = xml;
+
+      if (state.kind === 'dmn') {
+        // DMN title derivation handled by DMN support module
+        derivedTitle = null;
+      } else {
+        derivedTitle = getIdForState(state);
+      }
     }
+
+    state.baselineHash = hashString(content);
 
     if (derivedTitle) {
       const updateStateTitle = (window as any).updateStateTitle;
@@ -120,17 +137,24 @@ export function scheduleDirtyCheckDmn(state: DiagramTabState) {
 }
 
 export function bindModelerEvents(state: DiagramTabState) {
+  // Skip event tabs - they use custom change tracking through their editor callbacks
+  if (state.kind === 'event') {
+    return;
+  }
+
   const eventBus = state.modeler.get('eventBus');
   if (eventBus) {
     eventBus.on('commandStack.changed', () => {
       scheduleDirtyCheck(state);
-      try {
-        const id = getIdForState(state);
-        if (id) {
-          const updateStateTitle = (window as any).updateStateTitle;
-          if (updateStateTitle) updateStateTitle(state, id);
-        }
-      } catch {}
+      if (state.kind !== 'dmn') {
+        try {
+          const id = getIdForState(state);
+          if (id) {
+            const updateStateTitle = (window as any).updateStateTitle;
+            if (updateStateTitle) updateStateTitle(state, id);
+          }
+        } catch {}
+      }
     });
   }
 }
@@ -168,19 +192,19 @@ export function bindDmnTabEvents(state: DiagramTabState) {
 
       const updateTitle = debounce(() => {
         console.log('DMN Event: Updating tab title due to change');
+        // First sync name to ID, then update tab title
         syncDmnDecisionIdWithName(state);
-        updateDmnTabTitle(state);
+        // Wait for sync to complete before updating tab title
+        setTimeout(() => updateDmnTabTitle(state), 300);
       }, 200);
 
       eventBus.on('elements.changed', markDirty);
       eventBus.on('commandStack.changed', markDirty);
-      eventBus.on('elements.changed', updateTitle);
       eventBus.on('commandStack.changed', updateTitle);
 
       unbindActiveViewer = () => {
         eventBus.off('elements.changed', markDirty);
         eventBus.off('commandStack.changed', markDirty);
-        eventBus.off('elements.changed', updateTitle);
         eventBus.off('commandStack.changed', updateTitle);
       };
 
@@ -194,7 +218,7 @@ export function bindDmnTabEvents(state: DiagramTabState) {
     state.modeler.on('views.changed', () => {
       console.log('DMN Event: views.changed fired - rebinding to new active viewer');
       bindActiveViewer();
-      updateDmnTabTitle(state);
+      setTimeout(() => updateDmnTabTitle(state), 50);
     });
 
     state.modeler.on('view.contentChanged', () => {
@@ -202,13 +226,13 @@ export function bindDmnTabEvents(state: DiagramTabState) {
       if (!state.isImporting) {
         scheduleDirtyCheckDmn(state);
       }
-      updateDmnTabTitle(state);
+      setTimeout(() => updateDmnTabTitle(state), 50);
     });
 
     state.modeler.on('import.done', () => {
       console.log('DMN Event: import.done - initial binding');
       bindActiveViewer();
-      updateDmnTabTitle(state);
+      setTimeout(() => updateDmnTabTitle(state), 50);
     });
 
   } catch (e) {

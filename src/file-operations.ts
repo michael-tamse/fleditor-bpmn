@@ -87,12 +87,57 @@ function createDiagramTab(init: DiagramInit) {
   if (createFn) createFn(init);
 }
 
+export async function openEventFile(jsonContent: string, fileName: string, source: 'file' | 'host' | 'external' = 'file') {
+  try {
+    const eventModel = JSON.parse(jsonContent);
+
+    // Validate basic structure
+    if (!eventModel || typeof eventModel !== 'object') {
+      throw new Error('Invalid event file: not a valid JSON object');
+    }
+
+    // Ensure required fields exist
+    const model = {
+      key: eventModel.key || 'event',
+      name: eventModel.name || 'Event',
+      correlationParameters: Array.isArray(eventModel.correlationParameters)
+        ? eventModel.correlationParameters
+        : [],
+      payload: Array.isArray(eventModel.payload)
+        ? eventModel.payload
+        : []
+    };
+
+    const init: DiagramInit = {
+      title: model.name || model.key || fileName.replace(/\.event$/i, ''),
+      fileName: fileName,
+      statusMessage: `Event-Definition geladen: ${fileName}`,
+      kind: 'event',
+      eventModel: model  // Pass the event model to initialization
+    };
+
+    debug(`open-event: created tab from ${source}`, { fileName, modelKey: model.key });
+    const createFn = (window as any).createDiagramTab;
+    if (createFn) createFn(init);
+  } catch (error) {
+    console.error('Error opening event file:', error);
+    setStatus(`Fehler beim Öffnen der Event-Datei: ${(error as Error).message}`);
+    throw error;
+  }
+}
+
 export async function openFileAsTab(file: File) {
   if (!file) return;
   try {
     const raw = await file.text();
     const fileName = sanitizeFileName(file.name || 'diagram.bpmn20.xml');
-    await openXmlConsideringDuplicates(raw, fileName, 'file');
+
+    // Check if it's an event file
+    if (fileName.toLowerCase().endsWith('.event')) {
+      await openEventFile(raw, fileName, 'file');
+    } else {
+      await openXmlConsideringDuplicates(raw, fileName, 'file');
+    }
   } catch (err) {
     console.error(err);
     alert('Fehler beim Import der Datei.');
@@ -273,28 +318,36 @@ export async function saveXML() {
   const state = getActiveState();
   if (!state) return;
   try {
-    const withFlowableHeader = await prepareXmlForExport();
+    const content = await prepareXmlForExport();
     debug('save: browser download fallback');
 
-    let id: string | null;
-    let extension: string;
-    if (state.kind === 'dmn') {
-      id = deriveDmnId(withFlowableHeader);
-      extension = '.dmn';
+    let fileName: string;
+    let mimeType: string;
+
+    if (state.kind === 'event') {
+      // For event files, use the event key as filename
+      const eventModel = state.modeler.getModel();
+      const eventKey = eventModel.key || 'event';
+      fileName = sanitizeFileName(eventKey + '.event');
+      mimeType = 'application/json';
+    } else if (state.kind === 'dmn') {
+      const id = deriveDmnId(content);
+      fileName = sanitizeFileName((id || 'decision') + '.dmn');
+      mimeType = 'application/xml';
     } else {
-      id = deriveProcessId(withFlowableHeader);
-      extension = '.bpmn20.xml';
+      const id = deriveProcessId(content);
+      fileName = sanitizeFileName((id || 'diagram') + '.bpmn20.xml');
+      mimeType = 'application/xml';
     }
 
-    const name = sanitizeFileName((id || 'diagram') + extension);
-    download(name, withFlowableHeader, 'application/xml');
-    state.fileName = name;
+    download(fileName, content, mimeType);
+    state.fileName = fileName;
     persistActiveTab(state);
     await updateBaseline(state);
-    setStatus('XML exportiert');
+    setStatus(state.kind === 'event' ? 'Event-Definition gespeichert: ' + fileName : 'XML exportiert');
   } catch (err) {
     console.error(err);
-    alert('Fehler beim Export als XML');
+    alert(state.kind === 'event' ? 'Fehler beim Export der Event-Definition' : 'Fehler beim Export als XML');
   }
 }
 
@@ -381,6 +434,18 @@ export async function prepareXmlForExport(): Promise<string> {
   const state = getActiveState();
   if (!state) throw new Error('No active diagram state');
 
+  if (state.kind === 'event') {
+    // For event tabs, get JSON from the event editor
+    const eventModel = state.modeler.getModel();
+    const json = JSON.stringify(eventModel, null, 2);
+    debug('Event save: JSON export prepared', {
+      size: json.length,
+      key: eventModel.key,
+      name: eventModel.name
+    });
+    return json;
+  }
+
   if (state.kind === 'dmn') {
     const { xml } = await state.modeler.saveXML({ format: true });
     const syncedXml = syncDmnDecisionIdWithName(xml);
@@ -461,10 +526,16 @@ export async function saveXMLWithSidecarFallback() {
   const state = getActiveState();
   if (!state) return;
   try {
-    const xml = await prepareXmlForExport();
+    const content = await prepareXmlForExport();
     if (hostAvailable() && sidecar) {
-      debug('save: request host doc.save', { size: xml.length });
-      const res: any = await sidecar.request('doc.save', { xml, diagramType: state.kind }, 120000);
+      debug('save: request host doc.save', { size: content.length });
+
+      // For event files, send JSON data with event type
+      const saveData = state.kind === 'event'
+        ? { json: content, diagramType: state.kind }
+        : { xml: content, diagramType: state.kind };
+
+      const res: any = await sidecar.request('doc.save', saveData, 120000);
       if (res && res.ok) {
         debug('save: host ok', { path: (res && res.path) || undefined });
         const path = typeof res.path === 'string' ? res.path : undefined;

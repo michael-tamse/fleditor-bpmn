@@ -4,7 +4,7 @@ export interface EventField {
   name: string;
   type: FieldType;
   // UI-Status, nicht serialisiert:
-  ui?: { header?: boolean; fullPayload?: boolean; meta?: boolean };
+  ui?: Record<string, never>; // Removed header, fullPayload, meta
 }
 
 export interface EventModel {
@@ -46,10 +46,6 @@ class EventEditorImpl implements EventEditor {
   private nameInput!: HTMLInputElement;
   private tableBody!: HTMLTableSectionElement;
   private addButton!: HTMLButtonElement;
-  private importButton!: HTMLButtonElement;
-  private exportButton!: HTMLButtonElement;
-  private copyButton!: HTMLButtonElement;
-  private fileInput!: HTMLInputElement;
 
   constructor(container: HTMLElement, options: EventEditorOptions = {}) {
     this.container = container;
@@ -68,19 +64,13 @@ class EventEditorImpl implements EventEditor {
         <div class="event-header">
           <div class="header-form">
             <div class="form-group">
-              <label for="event-key">Key</label>
+              <label for="event-key">Event Key</label>
               <input type="text" id="event-key" class="event-key-input" placeholder="customerPaymentEvent" required>
             </div>
             <div class="form-group">
-              <label for="event-name">Name</label>
-              <input type="text" id="event-name" class="event-name-input" placeholder="Customer Payment" required>
+              <label for="event-name">Generated Name</label>
+              <input type="text" id="event-name" class="event-name-input" readonly>
             </div>
-          </div>
-          <div class="toolbar-actions">
-            <input type="file" id="import-file" accept=".json" style="display: none">
-            <button type="button" id="import-btn" class="btn-secondary">Import JSON</button>
-            <button type="button" id="export-btn" class="btn-secondary">Export JSON</button>
-            <button type="button" id="copy-btn" class="btn-secondary">Copy JSON</button>
           </div>
         </div>
 
@@ -90,10 +80,7 @@ class EventEditorImpl implements EventEditor {
               <tr>
                 <th>Field name</th>
                 <th>Type</th>
-                <th title="Header (UI only)">Header</th>
-                <th title="Full payload (UI only)">Full payload</th>
                 <th title="Correlation parameter">Correlation</th>
-                <th title="Meta (UI only)">Meta</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -117,23 +104,14 @@ class EventEditorImpl implements EventEditor {
     this.nameInput = this.container.querySelector('#event-name')!;
     this.tableBody = this.container.querySelector('.event-table-body')!;
     this.addButton = this.container.querySelector('#add-attribute')!;
-    this.importButton = this.container.querySelector('#import-btn')!;
-    this.exportButton = this.container.querySelector('#export-btn')!;
-    this.copyButton = this.container.querySelector('#copy-btn')!;
-    this.fileInput = this.container.querySelector('#import-file')!;
   }
 
   private bindEvents() {
-    // Header inputs
-    this.keyInput.addEventListener('input', () => this.onHeaderChange());
-    this.nameInput.addEventListener('input', () => this.onHeaderChange());
+    // Header input - key input triggers name generation and change tracking
+    this.keyInput.addEventListener('input', () => this.onKeyChange());
 
     // Buttons
     this.addButton.addEventListener('click', () => this.addField());
-    this.importButton.addEventListener('click', () => this.importJSON());
-    this.exportButton.addEventListener('click', () => this.exportJSON());
-    this.copyButton.addEventListener('click', () => this.copyJSON());
-    this.fileInput.addEventListener('change', () => this.handleFileImport());
 
     // Table delegation
     this.tableBody.addEventListener('click', this.handleTableClick.bind(this));
@@ -143,8 +121,38 @@ class EventEditorImpl implements EventEditor {
     this.tableBody.addEventListener('drop', this.handleDrop.bind(this));
   }
 
-  private onHeaderChange() {
+  private onKeyChange() {
+    // Generate name from key
+    this.generateNameFromKey();
+    // Update tab title immediately
+    this.updateTabTitle();
+    // Trigger change detection
     this.validateAndNotifyChange();
+  }
+
+  private generateNameFromKey() {
+    const key = this.keyInput.value.trim();
+    // Simply copy key to name
+    this.nameInput.value = key;
+  }
+
+  private updateTabTitle() {
+    const key = this.keyInput.value.trim();
+    const name = this.nameInput.value.trim();
+    const title = name || key || 'Event';
+
+    // Update the tab title via global function if available
+    const updateStateTitle = (window as any).updateStateTitle;
+    if (updateStateTitle) {
+      // Find current state - we need to get this from the tab manager
+      const getActiveState = (window as any).getActiveState;
+      if (getActiveState) {
+        const state = getActiveState();
+        if (state && state.kind === 'event') {
+          updateStateTitle(state, title);
+        }
+      }
+    }
   }
 
   private addField() {
@@ -153,7 +161,7 @@ class EventEditorImpl implements EventEditor {
       name: '',
       type: 'string',
       isCorrelation: false,
-      ui: { header: false, fullPayload: false, meta: false }
+      ui: {}
     };
 
     this.fields.push(field);
@@ -218,19 +226,7 @@ class EventEditorImpl implements EventEditor {
           </select>
         </td>
         <td>
-          <input type="checkbox" name="header" ${field.ui?.header ? 'checked' : ''}
-                 ${this.readOnly ? 'disabled' : ''} />
-        </td>
-        <td>
-          <input type="checkbox" name="fullPayload" ${field.ui?.fullPayload ? 'checked' : ''}
-                 ${this.readOnly ? 'disabled' : ''} />
-        </td>
-        <td>
           <input type="checkbox" name="correlation" ${field.isCorrelation ? 'checked' : ''}
-                 ${this.readOnly ? 'disabled' : ''} />
-        </td>
-        <td>
-          <input type="checkbox" name="meta" ${field.ui?.meta ? 'checked' : ''}
                  ${this.readOnly ? 'disabled' : ''} />
         </td>
         <td class="actions">
@@ -292,18 +288,6 @@ class EventEditorImpl implements EventEditor {
       case 'correlation':
         field.isCorrelation = (target as HTMLInputElement).checked;
         break;
-      case 'header':
-        if (!field.ui) field.ui = {};
-        field.ui.header = (target as HTMLInputElement).checked;
-        break;
-      case 'fullPayload':
-        if (!field.ui) field.ui = {};
-        field.ui.fullPayload = (target as HTMLInputElement).checked;
-        break;
-      case 'meta':
-        if (!field.ui) field.ui = {};
-        field.ui.meta = (target as HTMLInputElement).checked;
-        break;
     }
 
     this.validateAndNotifyChange();
@@ -348,55 +332,6 @@ class EventEditorImpl implements EventEditor {
     this.validateAndNotifyChange();
   }
 
-  private importJSON() {
-    this.fileInput.click();
-  }
-
-  private async handleFileImport() {
-    const file = this.fileInput.files?.[0];
-    if (!file) return;
-
-    try {
-      const content = await this.readFileAsText(file);
-      const model = JSON.parse(content);
-      this.setModel(model);
-    } catch (error) {
-      alert('Fehler beim Importieren: ' + (error as Error).message);
-    }
-  }
-
-  private exportJSON() {
-    if (!this.isModelValid()) {
-      alert('Das Modell enthält Validierungsfehler und kann nicht exportiert werden.');
-      return;
-    }
-
-    const model = this.getModel();
-    const json = JSON.stringify(model, null, 2);
-    this.downloadJson(`${model.key || 'event'}.json`, json);
-  }
-
-  private async copyJSON() {
-    if (!this.isModelValid()) {
-      alert('Das Modell enthält Validierungsfehler und kann nicht kopiert werden.');
-      return;
-    }
-
-    const model = this.getModel();
-    const json = JSON.stringify(model, null, 2);
-
-    try {
-      await navigator.clipboard.writeText(json);
-      // Kurze Erfolgsmeldung
-      const originalText = this.copyButton.textContent;
-      this.copyButton.textContent = '✓ Kopiert';
-      setTimeout(() => {
-        this.copyButton.textContent = originalText;
-      }, 1500);
-    } catch (error) {
-      alert('Fehler beim Kopieren: ' + (error as Error).message);
-    }
-  }
 
   private getFieldErrors(field: InternalField, index: number): string[] {
     const errors: string[] = [];
@@ -418,10 +353,8 @@ class EventEditorImpl implements EventEditor {
 
   private isModelValid(): boolean {
     const key = this.keyInput.value.trim();
-    const name = this.nameInput.value.trim();
 
-    if (!key || !name) return false;
-    if (key.includes(' ')) return false; // Key ohne Leerzeichen
+    if (!key) return false;
 
     return this.fields.every((field, index) =>
       this.getFieldErrors(field, index).length === 0
@@ -431,8 +364,6 @@ class EventEditorImpl implements EventEditor {
   private validateAndNotifyChange() {
     // Update visual validation state
     this.renderTable();
-    this.exportButton.disabled = !this.isModelValid();
-    this.copyButton.disabled = !this.isModelValid();
 
     // Check dirty state
     const wasDirty = this.isDirty;
@@ -454,31 +385,20 @@ class EventEditorImpl implements EventEditor {
     return JSON.stringify(this.originalModel) !== JSON.stringify(current);
   }
 
-  private readFileAsText(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(file);
-    });
-  }
-
-  private downloadJson(filename: string, content: string) {
-    const blob = new Blob([content], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
 
   private escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  updateBaseline() {
+    // Set current model as the baseline for change detection
+    this.originalModel = JSON.parse(JSON.stringify(this.getModel()));
+    this.isDirty = false;
+    if (this.options.onDirtyChange) {
+      this.options.onDirtyChange(false);
+    }
   }
 
   // Public API
@@ -492,8 +412,8 @@ class EventEditorImpl implements EventEditor {
       .map(f => ({ name: f.name.trim(), type: f.type }));
 
     return {
-      key: this.keyInput.value.trim(),
-      name: this.nameInput.value.trim(),
+      key: this.keyInput.value.trim() || 'event',
+      name: this.nameInput.value.trim() || this.keyInput.value.trim() || 'Event',
       correlationParameters,
       payload
     };
@@ -502,8 +422,13 @@ class EventEditorImpl implements EventEditor {
   setModel(model: EventModel) {
     this.originalModel = JSON.parse(JSON.stringify(model)); // Deep copy
 
+    // Set key as primary input
     this.keyInput.value = model.key || '';
-    this.nameInput.value = model.name || '';
+    // Generate name from key initially, then use provided name if different
+    this.generateNameFromKey();
+    if (model.name && model.name !== this.nameInput.value) {
+      this.nameInput.value = model.name;
+    }
 
     this.fields = [];
     this.nextFieldId = 1;
@@ -515,7 +440,7 @@ class EventEditorImpl implements EventEditor {
         name: param.name,
         type: param.type,
         isCorrelation: true,
-        ui: { header: false, fullPayload: false, meta: false }
+        ui: {}
       });
     });
 
@@ -526,22 +451,29 @@ class EventEditorImpl implements EventEditor {
         name: param.name,
         type: param.type,
         isCorrelation: false,
-        ui: { header: false, fullPayload: false, meta: false }
+        ui: {}
       });
     });
 
     this.renderTable();
+
+    // Reset baseline to current state after rendering
+    this.originalModel = JSON.parse(JSON.stringify(this.getModel()));
     this.isDirty = false;
-    this.validateAndNotifyChange();
+
+    // Notify without triggering change detection
+    if (this.options.onDirtyChange) {
+      this.options.onDirtyChange(false);
+    }
   }
 
   setReadOnly(readOnly: boolean) {
     this.readOnly = readOnly;
 
     this.keyInput.readOnly = readOnly;
-    this.nameInput.readOnly = readOnly;
+    // Name field is always readonly as it's auto-generated
+    this.nameInput.readOnly = true;
     this.addButton.disabled = readOnly;
-    this.importButton.disabled = readOnly;
 
     this.renderTable();
   }
