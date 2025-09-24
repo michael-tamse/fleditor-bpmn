@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Editor Test</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --panel: #f8fafc;
+            --text: #0f172a;
+            --muted: #475569;
+            --accent: #2563eb;
+            --border: #e5e7eb;
+        }
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial;
+            color: var(--text);
+            background: var(--bg);
+            height: 100vh;
+        }
+        #container {
+            height: 100vh;
+            padding: 16px;
+        }
+    </style>
+    <link rel="stylesheet" href="./src/event-editor/event-editor.css">
+</head>
+<body>
+    <div id="container"></div>
+
+    <script type="module">
+        import { createEventEditor } from './src/event-editor/event-editor.js';
+
+        const container = document.getElementById('container');
+
+        // Test with sample data
+        const sampleModel = {
+            key: 'customerPaymentEvent',
+            name: 'Customer Payment',
+            correlationParameters: [
+                { name: 'customerId', type: 'string' }
+            ],
+            payload: [
+                { name: 'amount', type: 'integer' },
+                { name: 'currency', type: 'string' },
+                { name: 'meta', type: 'json' }
+            ]
+        };
+
+        const editor = createEventEditor(container, {
+            model: sampleModel,
+            onChange: (model) => {
+                console.log('Model changed:', model);
+            },
+            onDirtyChange: (dirty) => {
+                console.log('Dirty state:', dirty);
+                document.title = dirty ? '• Event Editor Test' : 'Event Editor Test';
+            }
+        });
+
+        // Export test function to global scope for debugging
+        window.testEditor = editor;
+        window.testGetModel = () => console.log(JSON.stringify(editor.getModel(), null, 2));
+    </script>
+</body>
+</html>

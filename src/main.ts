@@ -11,6 +11,7 @@ import 'dmn-js/dist/assets/dmn-js-decision-table.css';
 import 'dmn-js/dist/assets/dmn-js-decision-table-controls.css';
 import 'dmn-js/dist/assets/dmn-js-literal-expression.css';
 import '@bpmn-io/properties-panel/assets/properties-panel.css';
+import './event-editor/event-editor.css';
 
 // Module imports
 import {

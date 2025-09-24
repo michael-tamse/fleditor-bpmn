@@ -1,0 +1,349 @@
+/* Event Editor Styling - Matches existing BPMN editor UI patterns */
+
+.event-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  padding: 16px;
+  gap: 16px;
+  min-height: 0;
+}
+
+/* Header Section */
+.event-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header-form {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.event-key-input,
+.event-name-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.event-key-input:focus,
+.event-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+/* Toolbar Actions */
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-secondary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Table Container */
+.event-table-container {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.event-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.event-table thead {
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.event-table th,
+.event-table td {
+  padding: 12px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.event-table th {
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel);
+  border-bottom: 2px solid var(--border);
+}
+
+.event-table td {
+  background: var(--bg);
+}
+
+/* Field Row */
+.field-row {
+  cursor: move;
+}
+
+.field-row:hover {
+  background: #f8fafc;
+}
+
+.field-row.error {
+  background: #fef2f2;
+}
+
+.field-row.error td {
+  background: inherit;
+}
+
+/* Form Controls within Table */
+.event-table input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  background: var(--bg);
+}
+
+.event-table input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1);
+}
+
+.event-table input[type="text"].error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.event-table select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.event-table select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.event-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Actions Column */
+.actions {
+  width: 120px;
+  white-space: nowrap;
+}
+
+.btn-icon {
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 4px;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  color: #dc2626;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.drag-handle {
+  color: var(--muted);
+  cursor: move;
+  user-select: none;
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+.drag-handle:hover {
+  color: var(--text);
+}
+
+/* Add Button */
+.event-actions {
+  display: flex;
+  justify-content: flex-start;
+  flex-shrink: 0;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: white;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Column Widths */
+.event-table th:nth-child(1),
+.event-table td:nth-child(1) {
+  width: 200px;
+  min-width: 150px;
+}
+
+.event-table th:nth-child(2),
+.event-table td:nth-child(2) {
+  width: 120px;
+  min-width: 100px;
+}
+
+.event-table th:nth-child(3),
+.event-table th:nth-child(4),
+.event-table th:nth-child(5),
+.event-table th:nth-child(6),
+.event-table td:nth-child(3),
+.event-table td:nth-child(4),
+.event-table td:nth-child(5),
+.event-table td:nth-child(6) {
+  width: 80px;
+  text-align: center;
+}
+
+.event-table th:nth-child(7),
+.event-table td:nth-child(7) {
+  width: 120px;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .event-header {
+    flex-direction: column;
+  }
+
+  .header-form {
+    flex-direction: column;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .event-table-container {
+    overflow-x: auto;
+  }
+
+  .event-table {
+    min-width: 800px;
+  }
+}
+
+/* Empty State */
+.event-editor-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.event-editor-empty .icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.event-editor-empty h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.event-editor-empty p {
+  margin: 0;
+  font-size: 14px;
+}

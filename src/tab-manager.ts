@@ -3,6 +3,7 @@ import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js
 import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
 import { createFlowableDmnModeler } from './dmn/dmn-factory';
+import { createEventEditor } from './event-editor/event-editor';
 import { Tabs } from './bpmn-tabs/tabs';
 import { updateEmptyStateVisibility, showConfirmDialog, updateZoomButtonsVisibility } from './ui-controls';
 
@@ -54,16 +55,23 @@ function updateToolbarButtons(state: DiagramTabState | null) {
     saveXmlBtn.title = 'Kein Diagramm geöffnet';
     saveSvgBtn.title = 'Kein Diagramm geöffnet';
   } else {
-    // Active tab - enable XML, conditionally enable SVG
-    saveXmlBtn.disabled = false;
-    saveXmlBtn.title = state.kind === 'dmn' ? 'Als DMN speichern' : 'Als BPMN speichern';
-
-    if (state.kind === 'bpmn') {
-      saveSvgBtn.disabled = false;
-      saveSvgBtn.title = 'Als SVG speichern';
-    } else {
+    // Active tab - handle different tab kinds
+    if (state.kind === 'event') {
+      saveXmlBtn.disabled = false;
+      saveXmlBtn.title = 'Als JSON speichern';
       saveSvgBtn.disabled = true;
-      saveSvgBtn.title = 'SVG-Export nur für BPMN-Diagramme verfügbar';
+      saveSvgBtn.title = 'Export nicht verfügbar für Event-Definitionen';
+    } else {
+      saveXmlBtn.disabled = false;
+      saveXmlBtn.title = state.kind === 'dmn' ? 'Als DMN speichern' : 'Als BPMN speichern';
+
+      if (state.kind === 'bpmn') {
+        saveSvgBtn.disabled = false;
+        saveSvgBtn.title = 'Als SVG speichern';
+      } else {
+        saveSvgBtn.disabled = true;
+        saveSvgBtn.title = 'SVG-Export nur für BPMN-Diagramme verfügbar';
+      }
     }
   }
 }
@@ -252,6 +260,13 @@ export function initTabs() {
         canvas.style.overflow = 'visible';
         canvas.style.height = '100%';
         canvas.style.width = '100%';
+      } else if (kind === 'event') {
+        canvas.className = 'canvas event-canvas';
+        canvas.setAttribute('aria-label', 'Event Editor Arbeitsfläche');
+        canvas.style.position = 'relative';
+        canvas.style.overflow = 'auto';
+        canvas.style.height = '100%';
+        canvas.style.width = '100%';
       } else {
         canvas.className = 'canvas';
         canvas.setAttribute('aria-label', 'BPMN Arbeitsfläche');
@@ -268,6 +283,45 @@ export function initTabs() {
       if (kind === 'dmn') {
         instance = createFlowableDmnModeler({
           container: canvas
+        });
+      } else if (kind === 'event') {
+        // For event tabs, hide the properties panel as the event editor has its own UI
+        layout.className = 'diagram-pane hide-properties';
+
+        // Create event editor instance with change tracking
+        const init = pendingTabInits.get(id);
+        const eventId = init?.title || `Event_${tabSequence}`;
+
+        instance = createEventEditor(canvas, {
+          model: {
+            key: eventId.toLowerCase().replace(/[^a-z0-9]/g, ''),
+            name: eventId,
+            correlationParameters: [
+              { name: 'businessKey', type: 'string' }
+            ],
+            payload: [
+              { name: 'eventData', type: 'json' }
+            ]
+          },
+          onChange: (model) => {
+            // Handle model changes for dirty state tracking
+            if (activeTabState && activeTabState.id === id) {
+              const updateBaseline = (window as any).updateBaseline;
+              if (updateBaseline) {
+                updateBaseline();
+              }
+            }
+          },
+          onDirtyChange: (dirty) => {
+            const state = tabStates.get(id);
+            if (state) {
+              state.dirty = dirty;
+              const setDirtyState = (window as any).setDirtyState;
+              if (setDirtyState) {
+                setDirtyState(id, dirty);
+              }
+            }
+          }
         });
       } else {
         instance = new BpmnModeler({
