@@ -495,18 +495,26 @@ export async function openViaSidecarOrFile() {
     const useSidecar = (window as any).sidecar || sidecar;
     const res: any = await useSidecar!.request('doc.load', undefined, 120000);
     let xml: string | undefined;
+    let json: string | undefined;
     let fileName: string | undefined;
     let canceled = false;
     if (typeof res === 'string') {
       xml = res;
     } else if (res && typeof res === 'object') {
       if (typeof res.xml === 'string') xml = res.xml;
+      if (typeof res.json === 'string') json = res.json;
       if (typeof res.fileName === 'string') fileName = sanitizeFileName(res.fileName);
       if (res.canceled === true) canceled = true;
     }
     if (typeof xml === 'string' && xml.trim()) {
       debug('open: host response', { length: xml.length, fileName });
       await openXmlConsideringDuplicates(xml, fileName, 'host');
+      return;
+    }
+    if (typeof json === 'string' && json.trim()) {
+      const resolvedName = fileName || 'event.event';
+      debug('open: host response (event)', { length: json.length, fileName: resolvedName });
+      await openEventFile(json, resolvedName, 'host');
       return;
     }
     if (canceled) {
