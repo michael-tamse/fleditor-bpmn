@@ -1,16 +1,44 @@
+import { store } from './state/rootStore';
+import type { TabState } from './state/types';
 import { DiagramTabState } from './types';
 
 let tabsControl: any = null;
 let modeler: any = null;
 
-// Per-tab sync timers for debouncing
-const syncTimerByTab = new WeakMap<DiagramTabState, any>();
-
 // Per-tab locks to prevent sync during ID updates
 const updatingIdByTab = new WeakMap<DiagramTabState, boolean>();
 
-// Per-tab tracking of last known name to detect actual changes
-const lastKnownNameByTab = new WeakMap<DiagramTabState, string>();
+const lastKnownNameByTabId = new Map<string, string>();
+const pendingSyncByTabId = new Map<string, ReturnType<typeof setTimeout>>();
+const lastModelVersionByTabId = new Map<string, number>();
+
+store.subscribe(() => {
+  const appState = store.getState();
+
+  for (const [tabId, timer] of pendingSyncByTabId.entries()) {
+    if (!appState.tabs[tabId]) {
+      clearTimeout(timer);
+      pendingSyncByTabId.delete(tabId);
+    }
+  }
+
+  for (const [tabId] of lastModelVersionByTabId.entries()) {
+    if (!appState.tabs[tabId]) {
+      lastModelVersionByTabId.delete(tabId);
+      lastKnownNameByTabId.delete(tabId);
+    }
+  }
+
+  Object.values(appState.tabs)
+    .filter((tab: TabState) => tab.kind === 'dmn')
+    .forEach((tab) => {
+      const previousVersion = lastModelVersionByTabId.get(tab.id);
+      if (previousVersion === undefined || previousVersion !== tab.modelVersion) {
+        lastModelVersionByTabId.set(tab.id, tab.modelVersion);
+        scheduleStoreDrivenSync(tab.id);
+      }
+    });
+});
 
 export function setTabsControl(control: any) {
   tabsControl = control;
@@ -18,6 +46,35 @@ export function setTabsControl(control: any) {
 
 export function setModeler(m: any) {
   modeler = m;
+}
+
+function resolveTabState(tabId: string): DiagramTabState | null {
+  try {
+    const getTabStates = (window as any).getTabStates;
+    const map = getTabStates?.();
+    if (map && typeof map.get === 'function') {
+      return map.get(tabId) ?? null;
+    }
+  } catch (error) {
+    console.warn('Failed to resolve DMN tab state:', error);
+  }
+  return null;
+}
+
+function scheduleStoreDrivenSync(tabId: string) {
+  const existing = pendingSyncByTabId.get(tabId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    pendingSyncByTabId.delete(tabId);
+    const tabState = resolveTabState(tabId);
+    if (!tabState) return;
+
+    try { syncDmnDecisionIdWithName(tabState); } catch (error) { console.warn('DMN sync via store failed:', error); }
+    try { updateDmnTabTitle(tabState); } catch (error) { console.warn('DMN title via store failed:', error); }
+  }, 180);
+
+  pendingSyncByTabId.set(tabId, timer);
 }
 
 export function syncDmnDecisionIdWithName(state: DiagramTabState) {
@@ -29,21 +86,7 @@ export function syncDmnDecisionIdWithName(state: DiagramTabState) {
     return;
   }
 
-  // Clear any pending sync operation for this tab
-  const existingTimer = syncTimerByTab.get(state);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-
-  // Use longer debounce time to allow user to finish typing
-  const timer = setTimeout(() => {
-    performDmnSync(state);
-  }, 500);
-  syncTimerByTab.set(state, timer);
-}
-
-function performDmnSync(state: DiagramTabState) {
-  return performDmnSyncInternal(state, false);
+  performDmnSyncInternal(state, false);
 }
 
 export function syncDmnDecisionIdWithNameImmediate(state: DiagramTabState): string | null {
@@ -73,7 +116,8 @@ function performDmnSyncInternal(state: DiagramTabState, immediate: boolean = fal
 
     // Early exits
     if (!immediate && updatingIdByTab.get(state)) return;
-    if (!immediate && lastKnownNameByTab.get(state) === currentName) return;
+    const tabKey = state.id;
+    if (!immediate && lastKnownNameByTabId.get(tabKey) === currentName) return;
     if (!currentName || currentName === currentId) return;
 
     // Create a sanitized ID from the name
@@ -105,13 +149,15 @@ function performDmnSyncInternal(state: DiagramTabState, immediate: boolean = fal
 
       try {
         modeling.updateProperties(decision, { id: newId });
-        lastKnownNameByTab.set(state, currentName);
+        lastKnownNameByTabId.set(tabKey, currentName);
       } finally {
         // Clear lock after a short delay to allow events to settle
         if (!immediate) {
           setTimeout(() => updatingIdByTab.set(state, false), 50);
         }
       }
+    } else {
+      lastKnownNameByTabId.set(tabKey, currentName);
     }
   } catch (e) {
     console.warn('Failed to sync DMN decision ID with name:', e);
@@ -142,6 +188,11 @@ export function updateDmnTabTitle(state: DiagramTabState) {
       title = decision.id;
     } else if (decision.$attrs && decision.$attrs.id) {
       title = decision.$attrs.id;
+    }
+
+    const storeTab = store.getState().tabs[state.id];
+    if (storeTab?.dirty && !title.startsWith('* ')) {
+      title = `* ${title}`;
     }
 
     tabsControl.setTitle(state.id, title);

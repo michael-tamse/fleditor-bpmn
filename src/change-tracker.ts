@@ -1,11 +1,32 @@
 import { debug } from './ui-controls';
+import { store } from './state/rootStore';
+import type { TabState } from './state/types';
+import { bindDmn } from './integrations/dmn-bridge';
 import { DiagramTabState, SidecarBridge } from './types';
 
 let tabsControl: any = null;
 let sidecar: SidecarBridge | null = null;
+const trackedStates = new Map<string, DiagramTabState>();
 
 export function setTabsControl(control: any) {
   tabsControl = control;
+
+  if (!control || (control as any).__storeActivationPatched) return;
+
+  if (typeof control.activate === 'function') {
+    const originalActivate = control.activate.bind(control);
+    control.activate = (id: string | null) => {
+      const result = originalActivate(id);
+      if (typeof id === 'string') {
+        store.dispatch({ type: 'TAB/ACTIVATED', id });
+      } else {
+        store.dispatch({ type: 'TAB/DEACTIVATED' });
+      }
+      return result;
+    };
+  }
+
+  (control as any).__storeActivationPatched = true;
 }
 
 export function setSidecar(s: SidecarBridge | null) {
@@ -15,6 +36,71 @@ export function setSidecar(s: SidecarBridge | null) {
 function hostAvailable(): boolean {
   try { return !!(sidecar && (sidecar as any).capabilities); } catch { return false; }
 }
+
+function getStoreTab(id: string): TabState | undefined {
+  return store.getState().tabs[id];
+}
+
+function applyDirtyPresentation(state: DiagramTabState, dirty: boolean) {
+  tabsControl?.markDirty(state.id, dirty);
+  if (tabsControl?.getActiveId() === state.id && hostAvailable()) {
+    try {
+      sidecar?.emitEvent('doc.changed', { dirty });
+      debug('event: doc.changed -> host');
+    } catch {}
+  }
+}
+
+function registerTabState(state: DiagramTabState) {
+  trackedStates.set(state.id, state);
+
+  const existing = getStoreTab(state.id);
+  if (!existing) {
+    store.dispatch({
+      type: 'TAB/OPENED',
+      tab: {
+        id: state.id,
+        kind: state.kind,
+        dirty: !!state.dirty,
+        selectionId: undefined,
+        modelVersion: 0,
+        filePath: state.fileName
+      }
+    });
+  }
+
+  if (state.kind !== 'dmn') {
+    patchDestroyForState(state);
+  }
+}
+
+function patchDestroyForState(state: DiagramTabState) {
+  const modeler: any = state.modeler;
+  if (!modeler || modeler.__storeDestroyPatched) return;
+
+  const originalDestroy = typeof modeler.destroy === 'function' ? modeler.destroy.bind(modeler) : undefined;
+  modeler.destroy = () => {
+    trackedStates.delete(state.id);
+    store.dispatch({ type: 'TAB/CLOSED', id: state.id });
+    return originalDestroy?.();
+  };
+  modeler.__storeDestroyPatched = true;
+}
+
+store.subscribe(() => {
+  const appState = store.getState();
+  for (const [id, tabState] of trackedStates.entries()) {
+    const snapshot = appState.tabs[id];
+    if (!snapshot) {
+      trackedStates.delete(id);
+      continue;
+    }
+    if (tabState.dirty !== snapshot.dirty) {
+      tabState.dirty = snapshot.dirty;
+      applyDirtyPresentation(tabState, snapshot.dirty);
+    }
+  }
+});
 
 function runWithState<T>(state: DiagramTabState, fn: () => T | Promise<T>): T | Promise<T> {
   // Placeholder - implemented in tab manager
@@ -37,11 +123,16 @@ function syncDmnDecisionIdWithName(state: DiagramTabState) {
 }
 
 export function setDirtyState(state: DiagramTabState, dirty: boolean) {
-  if (state.dirty === dirty) return;
-  state.dirty = dirty;
-  tabsControl?.markDirty(state.id, dirty);
-  if (tabsControl?.getActiveId() === state.id && hostAvailable()) {
-    try { sidecar?.emitEvent('doc.changed', { dirty }); debug('event: doc.changed -> host'); } catch {}
+  registerTabState(state);
+
+  if (state.dirty !== dirty) {
+    state.dirty = dirty;
+    applyDirtyPresentation(state, dirty);
+  }
+
+  const storeTab = getStoreTab(state.id);
+  if (!storeTab || storeTab.dirty !== dirty) {
+    store.dispatch({ type: 'EDITOR/DIRTY_SET', id: state.id, dirty });
   }
 }
 
@@ -107,40 +198,13 @@ export function scheduleDirtyCheck(state: DiagramTabState) {
   }, 300);
 }
 
-export function scheduleDirtyCheckDmn(state: DiagramTabState) {
-  const timeSinceImport = state.lastImportTime ? Date.now() - state.lastImportTime : Infinity;
-  console.log('DMN scheduleDirtyCheckDmn called, isImporting:', state.isImporting, 'timeSinceImport:', timeSinceImport, 'tabId:', state.id);
-
-  if (state.isImporting) {
-    console.log('DMN scheduleDirtyCheckDmn: Skipping dirty check during import');
-    return;
-  }
-
-  // Skip dirty check for 2 seconds after import to prevent false positives from initial events
-  if (timeSinceImport < 2000) {
-    console.log('DMN scheduleDirtyCheckDmn: Skipping dirty check - too soon after import (', timeSinceImport, 'ms)');
-    return;
-  }
-  if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
-  state.dirtyTimer = setTimeout(async () => {
-    try {
-      const { xml } = await runWithState(state, () => state.modeler.saveXML({ format: true }));
-      if (typeof state.baselineHash === 'number') {
-        setDirtyState(state, hashString(xml) !== state.baselineHash);
-      } else {
-        setDirtyState(state, true);
-      }
-    } catch {
-      setDirtyState(state, true);
-    }
-  }, 300);
-}
-
 export function bindModelerEvents(state: DiagramTabState) {
   // Skip event tabs - they use custom change tracking through their editor callbacks
   if (state.kind === 'event') {
     return;
   }
+
+  registerTabState(state);
 
   const eventBus = state.modeler.get('eventBus');
   if (eventBus) {
@@ -172,70 +236,6 @@ export function debounce(func: Function, wait: number) {
 }
 
 export function bindDmnTabEvents(state: DiagramTabState) {
-  let unbindActiveViewer = () => {};
-
-  function bindActiveViewer() {
-    unbindActiveViewer();
-    const activeViewer = state.modeler.getActiveViewer();
-    if (!activeViewer) return;
-
-    try {
-      const eventBus = activeViewer.get('eventBus');
-      const markDirty = debounce(() => {
-        if (state.isImporting) {
-          console.log('DMN Event: Change detected during import - skipping dirty check');
-          return;
-        }
-        console.log('DMN Event: Change detected in active viewer');
-        scheduleDirtyCheckDmn(state);
-      }, 100);
-
-      const updateTitle = debounce(() => {
-        console.log('DMN Event: Updating tab title due to change');
-        // First sync name to ID, then update tab title
-        syncDmnDecisionIdWithName(state);
-        // Wait for sync to complete before updating tab title
-        setTimeout(() => updateDmnTabTitle(state), 300);
-      }, 200);
-
-      eventBus.on('elements.changed', markDirty);
-      eventBus.on('commandStack.changed', markDirty);
-      eventBus.on('commandStack.changed', updateTitle);
-
-      unbindActiveViewer = () => {
-        eventBus.off('elements.changed', markDirty);
-        eventBus.off('commandStack.changed', markDirty);
-        eventBus.off('commandStack.changed', updateTitle);
-      };
-
-      console.log('DMN Event: Bound to active viewer:', activeViewer.type || 'unknown');
-    } catch (e) {
-      console.warn('Failed to bind to active DMN viewer:', e);
-    }
-  }
-
-  try {
-    state.modeler.on('views.changed', () => {
-      console.log('DMN Event: views.changed fired - rebinding to new active viewer');
-      bindActiveViewer();
-      setTimeout(() => updateDmnTabTitle(state), 50);
-    });
-
-    state.modeler.on('view.contentChanged', () => {
-      console.log('DMN Event: view.contentChanged fired');
-      if (!state.isImporting) {
-        scheduleDirtyCheckDmn(state);
-      }
-      setTimeout(() => updateDmnTabTitle(state), 50);
-    });
-
-    state.modeler.on('import.done', () => {
-      console.log('DMN Event: import.done - initial binding');
-      bindActiveViewer();
-      setTimeout(() => updateDmnTabTitle(state), 50);
-    });
-
-  } catch (e) {
-    console.warn('Failed to bind DMN events:', e);
-  }
+  registerTabState(state);
+  bindDmn(state.modeler, state.id);
 }
