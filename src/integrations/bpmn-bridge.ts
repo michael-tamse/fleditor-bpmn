@@ -12,6 +12,20 @@ export function createBpmnBinding(state: DiagramTabState): EditorBinding | null 
 
   const emitModelChanged = throttle(() => {
     store.dispatch({ type: 'EDITOR/MODEL_CHANGED', id: state.id });
+
+    const getIdForState = (window as any).getIdForState;
+    const updateStateTitle = (window as any).updateStateTitle;
+
+    if (typeof getIdForState === 'function' && typeof updateStateTitle === 'function') {
+      try {
+        const newId = getIdForState(state);
+        if (newId) {
+          updateStateTitle(state, newId);
+        }
+      } catch (error) {
+        console.warn('BPMN title bridge update failed:', error);
+      }
+    }
   }, 150);
 
   const onCommandStackChanged = () => emitModelChanged();

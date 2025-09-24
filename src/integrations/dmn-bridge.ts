@@ -9,6 +9,11 @@ export function createDmnBinding(state: DiagramTabState): EditorBinding | null {
 
   const emitModelChanged = throttle(() => {
     store.dispatch({ type: 'EDITOR/MODEL_CHANGED', id: state.id });
+
+    const updateTitle = (window as any).updateDmnTabTitle;
+    if (typeof updateTitle === 'function') {
+      try { updateTitle(state); } catch (error) { console.warn('DMN title bridge update failed:', error); }
+    }
   }, 150);
 
   let cleanupViewer = () => {};

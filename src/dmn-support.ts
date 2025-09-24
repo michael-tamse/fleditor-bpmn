@@ -165,12 +165,12 @@ function performDmnSyncInternal(state: DiagramTabState, immediate: boolean = fal
 }
 
 export function updateDmnTabTitle(state: DiagramTabState) {
-  if (!tabsControl || !state.id) {
+  if (!state?.id) {
     return;
   }
 
   try {
-    const activeView = state.modeler.getActiveView();
+    const activeView = state.modeler?.getActiveView?.();
     if (!activeView) {
       return;
     }
@@ -180,22 +180,36 @@ export function updateDmnTabTitle(state: DiagramTabState) {
       return;
     }
 
-    let title = 'DMN Entscheidung';
+    let baseTitle = 'DMN Entscheidung';
 
     if (decision.name && decision.name.trim()) {
-      title = decision.name.trim();
+      baseTitle = decision.name.trim();
     } else if (decision.id) {
-      title = decision.id;
+      baseTitle = String(decision.id);
     } else if (decision.$attrs && decision.$attrs.id) {
-      title = decision.$attrs.id;
+      baseTitle = String(decision.$attrs.id);
+    }
+
+    const updateStateTitle = (window as any).updateStateTitle;
+    if (typeof updateStateTitle === 'function') {
+      updateStateTitle(state, baseTitle);
+    } else {
+      state.title = baseTitle;
+    }
+
+    const control = tabsControl ?? (window as any).tabsControl;
+    if (!control?.setTitle) {
+      return;
+    }
+
+    if (!tabsControl) {
+      tabsControl = control;
     }
 
     const storeTab = store.getState().tabs[state.id];
-    if (storeTab?.dirty && !title.startsWith('* ')) {
-      title = `* ${title}`;
-    }
+    const displayTitle = storeTab?.dirty ? `* ${baseTitle}` : baseTitle;
 
-    tabsControl.setTitle(state.id, title);
+    control.setTitle(state.id, displayTitle);
   } catch (e) {
     console.warn('Failed to update DMN tab title:', e);
   }
