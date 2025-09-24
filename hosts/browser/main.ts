@@ -172,8 +172,8 @@ btnOpenInEditor.addEventListener('click', async () => {
 });
 
 btnSaveFromEditor.addEventListener('click', async () => {
-  // Nutzer klickt im Editor auf „Speichern XML“; Host empfängt doc.save und lädt herunter.
-  setState('Bitte im Editor auf „Speichern XML“ klicken');
+  // Nutzer klickt im Editor auf „Speichern“; Host empfängt doc.save und lädt herunter.
+  setState('Bitte im Editor auf „Speichern“ klicken');
 });
 
 chkMenubar.addEventListener('change', async () => {

@@ -3,11 +3,24 @@ import type { DiagramTabState } from '../types';
 import type { EditorBinding } from './editor-registry';
 import { throttle } from '../util/throttle';
 
+const SUPPRESS_AFTER_IMPORT_MS = 400;
+
 export function createDmnBinding(state: DiagramTabState): EditorBinding | null {
   const modeler: any = state.modeler;
   if (!modeler) return null;
 
-  const emitModelChanged = throttle(() => {
+  const emitModelChanged = throttle((origin: 'commandStack' | 'elements' | 'view') => {
+    if (state.isImporting) {
+      return;
+    }
+
+    if (origin !== 'commandStack') {
+      const lastImport = state.lastImportTime;
+      if (typeof lastImport === 'number' && (Date.now() - lastImport) < SUPPRESS_AFTER_IMPORT_MS) {
+        return;
+      }
+    }
+
     store.dispatch({ type: 'EDITOR/MODEL_CHANGED', id: state.id });
 
     const updateTitle = (window as any).updateDmnTabTitle;
@@ -41,20 +54,21 @@ export function createDmnBinding(state: DiagramTabState): EditorBinding | null {
       store.dispatch({ type: 'EDITOR/SELECTION_CHANGED', id: state.id, selectionId });
     };
 
-    const onElementsChanged = () => emitModelChanged();
+    const onElementsChanged = () => emitModelChanged('elements');
 
     eventBus.on('selection.changed', onSelectionChanged);
     eventBus.on('elements.changed', onElementsChanged);
 
     if (commandStack && typeof commandStack.on === 'function' && typeof commandStack.off === 'function') {
-      commandStack.on('changed', emitModelChanged);
+      const onCommandStackChanged = () => emitModelChanged('commandStack');
+      commandStack.on('changed', onCommandStackChanged);
       cleanupViewer = () => {
         eventBus.off('selection.changed', onSelectionChanged);
         eventBus.off('elements.changed', onElementsChanged);
-        commandStack.off('changed', emitModelChanged);
+        commandStack.off('changed', onCommandStackChanged);
       };
     } else {
-      const onCommandStackChanged = () => emitModelChanged();
+      const onCommandStackChanged = () => emitModelChanged('commandStack');
       eventBus.on('commandStack.changed', onCommandStackChanged);
       cleanupViewer = () => {
         eventBus.off('selection.changed', onSelectionChanged);
@@ -65,7 +79,7 @@ export function createDmnBinding(state: DiagramTabState): EditorBinding | null {
   };
 
   const onViewsChanged = () => bindActiveViewer();
-  const onContentChanged = () => emitModelChanged();
+  const onContentChanged = () => emitModelChanged('view');
   const onImportDone = () => bindActiveViewer();
 
   modeler.on?.('views.changed', onViewsChanged);

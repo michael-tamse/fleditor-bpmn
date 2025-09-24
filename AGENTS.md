@@ -87,7 +87,7 @@ Quick anchors (open in IDE):
   - Context menu per tab: Close, Close Others, Close All. Ctrl/Cmd+W closes the active tab; middle‑click closes a tab.
   - Overflow arrows appear when the tablist scrolls; keyboard navigation uses Left/Right/Home/End and Enter/Space.
   - Dirty indicator (●) per tab based on hashed baseline (XML/JSON depending on diagram kind).
-  - Toolbar buttons adapt to the active tab (`Speichern` for events, `Speichern XML/SVG` otherwise) via `tab-manager`.
+  - Toolbar buttons adapt to the active tab (Haupt-Button immer `Speichern`, SVG bleibt nur für BPMN aktiv) via `tab-manager`.
 - Integration:
 - `DiagramTabState` includes `{ id, kind, modeler, panelEl, layoutEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash?, isImporting }` stored in a shared Map owned by `tab-manager.ts`.
 - `change-tracker.ts` provides `setDirtyState`, `updateBaseline`, and DMN/event dirty scheduling; `main.ts` wires these helpers onto `window` for cross-module access.
@@ -165,7 +165,7 @@ Quick anchors (open in IDE):
   - The host iframe-loads `/index.html` (the editor) and sends `handshake:ack`.
   - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
   - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
-  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` oder `<decisionId>.dmn` herunter (Fallback `diagram.*`). Nach erfolgreichem Speichern setzt der aktive Tab seine Baseline (Dirty‑Dot verschwindet).
+  - „Speichern“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` oder `<decisionId>.dmn` herunter (Fallback `diagram.*`). Nach erfolgreichem Speichern setzt der aktive Tab seine Baseline (Dirty‑Dot verschwindet).
   - Event-Tabs senden `{ json, diagramType: 'event' }`; extend the host handler to export `<eventKey>.event` (the sample host currently ignores JSON, so editor-side download remains the reliable path).
   - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `<processId>.svg` herunter (ersatzweise `diagram.svg`).
 

@@ -68,7 +68,7 @@ function updateToolbarButtons(state: DiagramTabState | null) {
       saveSvgBtn.title = 'Export nicht verfügbar für Event-Definitionen';
     } else {
       saveXmlBtn.disabled = false;
-      saveXmlBtn.textContent = 'Speichern XML'; // Reset button text
+      saveXmlBtn.textContent = 'Speichern';
       saveXmlBtn.title = state.kind === 'dmn' ? 'Als DMN speichern' : 'Als BPMN speichern';
 
       if (state.kind === 'bpmn') {
