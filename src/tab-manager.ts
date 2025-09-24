@@ -211,7 +211,7 @@ function createTabKey(init: DiagramInit): string {
   if (init.kind === 'event' && init.eventModel) {
     return `event:${init.eventModel.key}:${init.eventModel.name}`;
   }
-  if (init.xml) {
+  if (init.xml && typeof init.xml === 'string') {
     // Use a hash of the XML content
     return `content:${init.xml.slice(0, 100)}`;
   }
@@ -453,12 +453,25 @@ export function initTabs() {
             const eventModel = state.modeler.getModel();
             stateId = eventModel.key || null;
           }
+        } else if (state.kind === 'dmn') {
+          // For DMN tabs, force immediate sync and get the updated ID
+          const syncDmnDecisionIdWithNameImmediate = (window as any).syncDmnDecisionIdWithNameImmediate;
+          if (syncDmnDecisionIdWithNameImmediate) {
+            stateId = syncDmnDecisionIdWithNameImmediate(state);
+          }
+          // Fallback to getIdForState if immediate sync fails
+          if (!stateId) {
+            const getIdForState = (window as any).getIdForState;
+            if (getIdForState) {
+              const result = getIdForState(state);
+              stateId = result && typeof result.then === 'function' ? await result : result;
+            }
+          }
         } else {
-          // For BPMN/DMN tabs, use existing getIdForState logic
+          // For BPMN tabs, use existing getIdForState logic
           const getIdForState = (window as any).getIdForState;
           if (getIdForState) {
             const result = getIdForState(state);
-            // Handle both sync and async results
             stateId = result && typeof result.then === 'function' ? await result : result;
           }
         }

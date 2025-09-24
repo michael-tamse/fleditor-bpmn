@@ -43,6 +43,22 @@ export function syncDmnDecisionIdWithName(state: DiagramTabState) {
 }
 
 function performDmnSync(state: DiagramTabState) {
+  return performDmnSyncInternal(state, false);
+}
+
+export function syncDmnDecisionIdWithNameImmediate(state: DiagramTabState): string | null {
+  performDmnSyncInternal(state, true);
+  // Return the current ID after sync
+  try {
+    const activeView = state.modeler?.getActiveView();
+    if (activeView && activeView.element && activeView.element.id) {
+      return String(activeView.element.id);
+    }
+  } catch {}
+  return null;
+}
+
+function performDmnSyncInternal(state: DiagramTabState, immediate: boolean = false) {
   if (state.kind !== 'dmn' || !state.modeler) return;
 
   try {
@@ -56,8 +72,8 @@ function performDmnSync(state: DiagramTabState) {
     const currentId = String(decision.id || '');
 
     // Early exits
-    if (updatingIdByTab.get(state)) return;
-    if (lastKnownNameByTab.get(state) === currentName) return;
+    if (!immediate && updatingIdByTab.get(state)) return;
+    if (!immediate && lastKnownNameByTab.get(state) === currentName) return;
     if (!currentName || currentName === currentId) return;
 
     // Create a sanitized ID from the name
@@ -68,7 +84,8 @@ function performDmnSync(state: DiagramTabState) {
       .replace(/^_|_$/g, '');
 
     // Check for ID collisions using ElementRegistry
-    const elementRegistry = state.modeler.get('elementRegistry');
+    const viewer = state.modeler.getActiveViewer();
+    const elementRegistry = viewer?.get('elementRegistry');
     let newId = base || 'Decision_1';
     if (elementRegistry?.get(newId)) {
       let i = 2;
@@ -80,19 +97,20 @@ function performDmnSync(state: DiagramTabState) {
     if (decision.id !== newId) {
       console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${newId}"`);
 
-      const viewer = state.modeler.getActiveViewer();
       const modeling = viewer?.get('modeling');
       if (!modeling) return;
 
       // Set lock to prevent circular updates for this tab
-      updatingIdByTab.set(state, true);
+      if (!immediate) updatingIdByTab.set(state, true);
 
       try {
         modeling.updateProperties(decision, { id: newId });
         lastKnownNameByTab.set(state, currentName);
       } finally {
         // Clear lock after a short delay to allow events to settle
-        setTimeout(() => updatingIdByTab.set(state, false), 50);
+        if (!immediate) {
+          setTimeout(() => updatingIdByTab.set(state, false), 50);
+        }
       }
     }
   } catch (e) {

@@ -87,6 +87,7 @@ import {
 import {
   updateDmnTabTitle,
   syncDmnDecisionIdWithName,
+  syncDmnDecisionIdWithNameImmediate,
   deriveDmnDecisionIdFromModel,
   createInitialDmnXmlWithDecisionId,
   getIdForState,
@@ -271,6 +272,7 @@ function initializeModules() {
   (window as any).setDirtyState = setDirtyState;
   (window as any).updateDmnTabTitle = updateDmnTabTitle;
   (window as any).syncDmnDecisionIdWithName = syncDmnDecisionIdWithName;
+  (window as any).syncDmnDecisionIdWithNameImmediate = syncDmnDecisionIdWithNameImmediate;
   (window as any).openFileIntoState = async (file: File, state: any) => {
     const { openFileIntoState } = await import('./file-operations');
     return openFileIntoState(file, state);

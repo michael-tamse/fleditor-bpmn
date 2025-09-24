@@ -170,7 +170,7 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
   // Fix: if init.xml is an object, it might be a DiagramInit or similar, extract the actual XML
   if (typeof xml === 'object' && xml !== null) {
     console.log('[Debug] init.xml is object, trying to extract XML string');
-    xml = null; // Force fallback to initial XML
+    xml = state.kind === 'dmn' ? initialDmnXml : initialXml; // Use fallback immediately
   }
 
   if (!xml) {
