@@ -222,6 +222,24 @@ export function findTabByProcessId(pid: string): DiagramTabState | null {
   return null;
 }
 
+export function findEventTabByKey(key: string): DiagramTabState | null {
+  if (!key) return null;
+
+  for (const state of tabStates.values()) {
+    if (state.kind !== 'event' || !state.modeler || typeof state.modeler.getModel !== 'function') {
+      continue;
+    }
+    try {
+      const model = state.modeler.getModel();
+      if (model && model.key === key) {
+        return state;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
 function createTabKey(init: DiagramInit): string {
   // Create a key to identify duplicate tabs
   if (init.fileName) {

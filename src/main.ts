@@ -61,6 +61,7 @@ import {
   getModeler,
   setTabSequence,
   findTabByProcessId,
+  findEventTabByKey,
   createDiagramTab,
   runWithState,
   updateStateTitle,
@@ -265,6 +266,7 @@ function initializeModules() {
   (window as any).persistActiveTab = persistActiveTab;
   (window as any).maybeRestoreActiveTab = maybeRestoreActiveTab;
   (window as any).findTabByProcessId = findTabByProcessId;
+  (window as any).findEventTabByKey = findEventTabByKey;
   (window as any).createDiagramTab = createDiagramTab;
   (window as any).runWithState = runWithState;
   (window as any).bootstrapState = bootstrapState;

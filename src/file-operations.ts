@@ -82,6 +82,11 @@ function findTabByProcessId(pid: string): DiagramTabState | null {
   return findFn ? findFn(pid) : null;
 }
 
+function findEventTabByKey(key: string): DiagramTabState | null {
+  const findFn = (window as any).findEventTabByKey;
+  return findFn ? findFn(key) : null;
+}
+
 function createDiagramTab(init: DiagramInit) {
   const createFn = (window as any).createDiagramTab;
   if (createFn) createFn(init);
@@ -108,17 +113,68 @@ export async function openEventFile(jsonContent: string, fileName: string, sourc
         : []
     };
 
+    const eventKey = model.key || 'event';
+    const safeFileName = fileName ? sanitizeFileName(fileName) : undefined;
+    const existing = findEventTabByKey(eventKey);
+
+    const statusLabel = fileName || safeFileName || eventKey;
+    const derivedTitle = model.name || eventKey || (fileName ? fileName.replace(/\.event$/i, '') : 'Event');
+
     const init: DiagramInit = {
-      title: model.name || model.key || fileName.replace(/\.event$/i, ''),
-      fileName: fileName,
-      statusMessage: `Event-Definition geladen: ${fileName}`,
+      title: derivedTitle,
+      fileName: safeFileName,
+      statusMessage: `Event-Definition geladen: ${statusLabel}`,
       kind: 'event',
       eventModel: model  // Pass the event model to initialization
     };
 
-    debug(`open-event: created tab from ${source}`, { fileName, modelKey: model.key });
-    const createFn = (window as any).createDiagramTab;
-    if (createFn) createFn(init);
+    debug(`open-event: prepared import from ${source}`, { fileName, modelKey: model.key, existing: !!existing });
+
+    if (!existing) {
+      const createFn = (window as any).createDiagramTab;
+      if (createFn) createFn(init);
+      return;
+    }
+
+    if (safeFileName && existing.fileName && sanitizeFileName(existing.fileName) !== safeFileName) {
+      const titleMsg = `${eventKey ? `[${eventKey}] ` : ''}Gleiches Event geöffnet`;
+      const ok = await showConfirmDialog(
+        'Ein Event mit gleicher ID ist bereits geöffnet. Neues Tab öffnen?',
+        titleMsg,
+        { okLabel: 'Neuer Tab', okVariant: 'primary', cancelLabel: 'Im vorhandenen Tab überschreiben' }
+      );
+      if (ok) {
+        const createFn = (window as any).createDiagramTab;
+        if (createFn) createFn(init);
+        return;
+      }
+    }
+
+    if (existing.dirty) {
+      const titleMsg = `${eventKey ? `[${eventKey}] ` : ''}Event überschreiben?`;
+      const ok = await showConfirmDialog('Es gibt ungespeicherte Änderungen. Änderungen überschreiben?', titleMsg, { okLabel: 'Ja' });
+      if (!ok) {
+        setStatus('Öffnen abgebrochen');
+        const tabsControl = (window as any).tabsControl;
+        tabsControl?.activate(existing.id);
+        return;
+      }
+    }
+
+    if (existing.modeler && typeof existing.modeler.setModel === 'function') {
+      existing.modeler.setModel(model);
+    }
+
+    const newTitle = model.name || eventKey || existing.title;
+    existing.fileName = safeFileName || existing.fileName;
+    const tabsControl = (window as any).tabsControl;
+    tabsControl?.activate(existing.id);
+    const updateStateTitle = (window as any).updateStateTitle;
+    if (updateStateTitle) updateStateTitle(existing, newTitle);
+
+    await updateBaseline(existing);
+
+    setStatus(`Event-Definition geladen: ${statusLabel}`);
   } catch (error) {
     console.error('Error opening event file:', error);
     setStatus(`Fehler beim Öffnen der Event-Datei: ${(error as Error).message}`);
