@@ -1,12 +1,13 @@
 import { debug } from './ui-controls';
 import { store } from './state/rootStore';
 import type { TabState } from './state/types';
-import { bindDmn } from './integrations/dmn-bridge';
+import { createEditorBinding, type EditorBinding } from './integrations/editor-registry';
 import { DiagramTabState, SidecarBridge } from './types';
 
 let tabsControl: any = null;
 let sidecar: SidecarBridge | null = null;
 const trackedStates = new Map<string, DiagramTabState>();
+const editorBindings = new Map<string, EditorBinding>();
 
 export function setTabsControl(control: any) {
   tabsControl = control;
@@ -51,6 +52,22 @@ function applyDirtyPresentation(state: DiagramTabState, dirty: boolean) {
   }
 }
 
+function disposeBinding(id: string) {
+  const binding = editorBindings.get(id);
+  if (binding) {
+    try { binding.dispose(); } catch {}
+    editorBindings.delete(id);
+  }
+}
+
+function ensureBinding(state: DiagramTabState) {
+  if (editorBindings.has(state.id)) return;
+  const binding = createEditorBinding(state);
+  if (binding) {
+    editorBindings.set(state.id, binding);
+  }
+}
+
 function registerTabState(state: DiagramTabState) {
   trackedStates.set(state.id, state);
 
@@ -69,20 +86,29 @@ function registerTabState(state: DiagramTabState) {
     });
   }
 
-  if (state.kind !== 'dmn') {
-    patchDestroyForState(state);
-  }
+  ensureBinding(state);
+  patchLifecycleForState(state);
 }
 
-function patchDestroyForState(state: DiagramTabState) {
+function patchLifecycleForState(state: DiagramTabState) {
   const modeler: any = state.modeler;
   if (!modeler || modeler.__storeDestroyPatched) return;
 
-  const originalDestroy = typeof modeler.destroy === 'function' ? modeler.destroy.bind(modeler) : undefined;
-  modeler.destroy = () => {
+  const destroyFn = typeof modeler.destroy === 'function' ? 'destroy'
+    : typeof modeler.dispose === 'function' ? 'dispose'
+    : null;
+
+  if (!destroyFn) {
+    modeler.__storeDestroyPatched = true;
+    return;
+  }
+
+  const original = modeler[destroyFn].bind(modeler);
+  modeler[destroyFn] = () => {
+    disposeBinding(state.id);
     trackedStates.delete(state.id);
     store.dispatch({ type: 'TAB/CLOSED', id: state.id });
-    return originalDestroy?.();
+    return original();
   };
   modeler.__storeDestroyPatched = true;
 }
@@ -92,6 +118,7 @@ store.subscribe(() => {
   for (const [id, tabState] of trackedStates.entries()) {
     const snapshot = appState.tabs[id];
     if (!snapshot) {
+      disposeBinding(id);
       trackedStates.delete(id);
       continue;
     }
@@ -205,6 +232,7 @@ export function bindModelerEvents(state: DiagramTabState) {
   }
 
   registerTabState(state);
+  ensureBinding(state);
 
   const eventBus = state.modeler.get('eventBus');
   if (eventBus) {
@@ -237,5 +265,10 @@ export function debounce(func: Function, wait: number) {
 
 export function bindDmnTabEvents(state: DiagramTabState) {
   registerTabState(state);
-  bindDmn(state.modeler, state.id);
+  ensureBinding(state);
+}
+
+export function bindEventEditor(state: DiagramTabState) {
+  registerTabState(state);
+  ensureBinding(state);
 }

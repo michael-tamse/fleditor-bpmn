@@ -368,8 +368,7 @@ export function initTabs() {
         instance = createEventEditor(canvas, {
           model: eventModel,
           onChange: (model) => {
-            // Handle model changes for dirty state tracking - updateBaseline is called automatically
-            // when content changes in event editor due to onDirtyChange
+            // handled by event bridge (patched onto options)
           },
           onDirtyChange: (dirty) => {
             const state = tabStates.get(id);
@@ -404,6 +403,11 @@ export function initTabs() {
         } else {
           setupModelerForState(state);
         }
+      }
+
+      if (kind === 'event') {
+        const bindEventEditor = (window as any).bindEventEditor;
+        bindEventEditor?.(state);
       }
       updateEmptyStateVisibility();
 
@@ -486,7 +490,11 @@ export function initTabs() {
       if (state.dirtyTimer) clearTimeout(state.dirtyTimer);
 
       try {
-        state.modeler.destroy();
+        if (state.modeler && typeof state.modeler.destroy === 'function') {
+          state.modeler.destroy();
+        } else if (state.modeler && typeof state.modeler.dispose === 'function') {
+          state.modeler.dispose();
+        }
       } catch {}
       tabStates.delete(id);
       if (activeTabState && activeTabState.id === id) {

@@ -1,108 +1,80 @@
 import { store } from '../state/rootStore';
-import type { Action } from '../state/types';
+import type { DiagramTabState } from '../types';
+import type { EditorBinding } from './editor-registry';
 import { throttle } from '../util/throttle';
 
-interface BindingState {
-  tabId: string;
-  cleanupModeler(): void;
-  cleanupViewer(): void;
-  restoreDestroy?: () => void;
-}
+export function createDmnBinding(state: DiagramTabState): EditorBinding | null {
+  const modeler: any = state.modeler;
+  if (!modeler) return null;
 
-const bindings = new WeakMap<any, BindingState>();
+  const emitModelChanged = throttle(() => {
+    store.dispatch({ type: 'EDITOR/MODEL_CHANGED', id: state.id });
+  }, 150);
 
-function dispatch(action: Action) {
-  store.dispatch(action);
-}
+  let cleanupViewer = () => {};
 
-function createViewerBinding(modeler: any, tabId: string): () => void {
-  try {
+  const bindActiveViewer = () => {
+    cleanupViewer();
+
     const activeViewer = modeler.getActiveViewer?.();
-    if (!activeViewer) return () => {};
+    if (!activeViewer) {
+      cleanupViewer = () => {};
+      return;
+    }
 
     const eventBus = activeViewer.get?.('eventBus');
     const commandStack = activeViewer.get?.('commandStack');
 
-    if (!eventBus || !commandStack) return () => {};
+    if (!eventBus) {
+      cleanupViewer = () => {};
+      return;
+    }
 
-    const emitModelChanged = throttle(() => {
-      dispatch({ type: 'EDITOR/MODEL_CHANGED', id: tabId });
-    }, 150);
-
-    const onSelectionChanged = (evt: any) => {
-      const next = Array.isArray(evt?.newSelection) ? evt.newSelection[0] : undefined;
-      const selectionId = next ? String(next.id) : undefined;
-      dispatch({ type: 'EDITOR/SELECTION_CHANGED', id: tabId, selectionId });
+    const onSelectionChanged = (event: any) => {
+      const selection = Array.isArray(event?.newSelection) ? event.newSelection[0] : undefined;
+      const selectionId = selection ? String(selection.id) : undefined;
+      store.dispatch({ type: 'EDITOR/SELECTION_CHANGED', id: state.id, selectionId });
     };
 
-    eventBus.on?.('selection.changed', onSelectionChanged);
-    eventBus.on?.('elements.changed', emitModelChanged);
-    commandStack.on?.('changed', emitModelChanged);
+    const onElementsChanged = () => emitModelChanged();
 
-    return () => {
-      eventBus.off?.('selection.changed', onSelectionChanged);
-      eventBus.off?.('elements.changed', emitModelChanged);
-      commandStack.off?.('changed', emitModelChanged);
-    };
-  } catch (error) {
-    console.warn('Failed to bind DMN active viewer:', error);
-    return () => {};
-  }
-}
+    eventBus.on('selection.changed', onSelectionChanged);
+    eventBus.on('elements.changed', onElementsChanged);
 
-export function bindDmn(modeler: any, tabId: string) {
-  if (!modeler || bindings.has(modeler)) return;
-
-  const state: BindingState = {
-    tabId,
-    cleanupModeler: () => {},
-    cleanupViewer: () => {}
+    if (commandStack && typeof commandStack.on === 'function' && typeof commandStack.off === 'function') {
+      commandStack.on('changed', emitModelChanged);
+      cleanupViewer = () => {
+        eventBus.off('selection.changed', onSelectionChanged);
+        eventBus.off('elements.changed', onElementsChanged);
+        commandStack.off('changed', emitModelChanged);
+      };
+    } else {
+      const onCommandStackChanged = () => emitModelChanged();
+      eventBus.on('commandStack.changed', onCommandStackChanged);
+      cleanupViewer = () => {
+        eventBus.off('selection.changed', onSelectionChanged);
+        eventBus.off('elements.changed', onElementsChanged);
+        eventBus.off('commandStack.changed', onCommandStackChanged);
+      };
+    }
   };
 
-  const rebindViewer = () => {
-    state.cleanupViewer();
-    state.cleanupViewer = createViewerBinding(modeler, tabId);
-  };
-
-  const onViewsChanged = () => rebindViewer();
-  const onImportDone = () => rebindViewer();
-  const onContentChanged = throttle(() => {
-    dispatch({ type: 'EDITOR/MODEL_CHANGED', id: tabId });
-  }, 150);
+  const onViewsChanged = () => bindActiveViewer();
+  const onContentChanged = () => emitModelChanged();
+  const onImportDone = () => bindActiveViewer();
 
   modeler.on?.('views.changed', onViewsChanged);
   modeler.on?.('view.contentChanged', onContentChanged);
   modeler.on?.('import.done', onImportDone);
 
-  state.cleanupModeler = () => {
-    modeler.off?.('views.changed', onViewsChanged);
-    modeler.off?.('view.contentChanged', onContentChanged);
-    modeler.off?.('import.done', onImportDone);
-  };
+  bindActiveViewer();
 
-  rebindViewer();
-
-  const originalDestroy = typeof modeler.destroy === 'function' ? modeler.destroy.bind(modeler) : undefined;
-  modeler.destroy = () => {
-    unbindDmn(modeler);
-    return originalDestroy?.();
-  };
-  state.restoreDestroy = () => {
-    if (originalDestroy) {
-      modeler.destroy = originalDestroy;
+  return {
+    dispose() {
+      cleanupViewer();
+      modeler.off?.('views.changed', onViewsChanged);
+      modeler.off?.('view.contentChanged', onContentChanged);
+      modeler.off?.('import.done', onImportDone);
     }
   };
-
-  bindings.set(modeler, state);
-}
-
-export function unbindDmn(modeler: any) {
-  const state = bindings.get(modeler);
-  if (!state) return;
-
-  state.cleanupViewer();
-  state.cleanupModeler();
-  state.restoreDestroy?.();
-  dispatch({ type: 'TAB/CLOSED', id: state.tabId });
-  bindings.delete(modeler);
 }

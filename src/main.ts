@@ -48,7 +48,8 @@ import {
   setDirtyState,
   updateBaseline,
   setTabsControl as setChangeTrackerTabsControl,
-  setSidecar as setChangeTrackerSidecar
+  setSidecar as setChangeTrackerSidecar,
+  bindEventEditor
 } from './change-tracker';
 
 import {
@@ -270,6 +271,7 @@ function initializeModules() {
   (window as any).setupModelerForState = setupModelerForState;
   (window as any).updateBaseline = updateBaseline;
   (window as any).setDirtyState = setDirtyState;
+  (window as any).bindEventEditor = bindEventEditor;
   (window as any).updateDmnTabTitle = updateDmnTabTitle;
   (window as any).syncDmnDecisionIdWithName = syncDmnDecisionIdWithName;
   (window as any).syncDmnDecisionIdWithNameImmediate = syncDmnDecisionIdWithNameImmediate;
