@@ -34,7 +34,11 @@ Note: Large bundle warnings are expected; not a blocker.
 ## Key Files
 - `src/main.ts`: Lightweight orchestrator that wires toolbar, tab manager, sidecar bridge, and module globals; delegates actual model handling to specialised modules.
 - `src/tab-manager.ts`: Core tab lifecycle (create/activate/close) across BPMN, DMN, and Event tabs, integrates the accessible tab UI, toolbar button state, and tab persistence.
-- `src/change-tracker.ts`: Baseline hashing + dirty state management for all tab kinds, emits `doc.changed` via Sidecar, and houses DMN-specific debounce helpers.
+- `src/change-tracker.ts`: Bridges tab instances into the global store, mirrors dirty markers to the UI/host, and delegates DMN bindings to `integrations/dmn-bridge`.
+- `src/state/`: Lightweight Redux-style store (`store.ts`, `types.ts`, `reducer.ts`, `selectors.ts`, `rootStore.ts`) centralising `activeTab`, dirty flags, selection IDs, and `modelVersion` counters; effects attach via `attachEffects(store)` to avoid circular imports.
+- `src/integrations/dmn-bridge.ts`: Single bind/unbind point for `dmn-js` (eventBus + commandStack) that dispatches selection/model changes and cleans listeners on destroy.
+- `src/effects/effects.ts`: Effect layer subscribed to the store (autosave scheduling, DMN title/ID sync, action ring buffer for debugging) – initialised via `attachEffects(store)`.
+- `src/util/throttle.ts`: Shared `throttle`/`debounce` helpers used by the bridge/effects.
 - `src/file-operations.ts`: Open/save flows (host + local), duplicate detection, event JSON handling, export preparation, and download fallbacks.
 - `src/modeler-setup.ts`: Per-tab modeler bootstrap (BPMN/DMN), drag & drop import, default Flowable injections for new shapes, and change-tracking wiring.
 - `src/model-transformations.ts`: Export-time Flowable rewrites invoked before saving (external-worker stencils, mapping normalisation, etc.).
@@ -85,15 +89,16 @@ Quick anchors (open in IDE):
   - Dirty indicator (●) per tab based on hashed baseline (XML/JSON depending on diagram kind).
   - Toolbar buttons adapt to the active tab (`Speichern` for events, `Speichern XML/SVG` otherwise) via `tab-manager`.
 - Integration:
-  - `DiagramTabState` includes `{ id, kind, modeler, panelEl, layoutEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash?, isImporting }` stored in a shared Map owned by `tab-manager.ts`.
-  - `change-tracker.ts` provides `setDirtyState`, `updateBaseline`, and DMN/event dirty scheduling; `main.ts` wires these helpers onto `window` for cross-module access.
-  - `file-operations.ts` handles imports (host/local/drag-drop), runs duplicate checks via `openXmlConsideringDuplicates`, and updates baselines after save/import.
-  - Active tab metadata persists in `localStorage` (`fleditor:lastActiveTab`) so reloads can re-activate a matching tab by title/file.
-  - `modeler-setup.ts` bootstraps BPMN/DMN modelers per tab, binds drag/drop, and applies Flowable defaults when new shapes appear.
+- `DiagramTabState` includes `{ id, kind, modeler, panelEl, layoutEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash?, isImporting }` stored in a shared Map owned by `tab-manager.ts`.
+- `change-tracker.ts` provides `setDirtyState`, `updateBaseline`, and DMN/event dirty scheduling; `main.ts` wires these helpers onto `window` for cross-module access.
+- `file-operations.ts` handles imports (host/local/drag-drop), runs duplicate checks via `openXmlConsideringDuplicates`, and updates baselines after save/import.
+- Active tab metadata persists in `localStorage` (`fleditor:lastActiveTab`) so reloads can re-activate a matching tab by title/file.
+- `modeler-setup.ts` bootstraps BPMN/DMN modelers per tab, binds drag/drop, and applies Flowable defaults when new shapes appear.
+- The store emits single-source-of-truth events (`TAB/*`, `EDITOR/*`); DMN dirty/title handling now listens via `effects.ts` instead of local debounces.
 
 ### New Tab Defaults
 - BPMN: `computeNextProcessId()` scans open tabs, `createInitialXmlWithProcessId(pid)` fills IDs/DI, and tab titles default to the generated `Process_n` value.
-- DMN: Tabs start from `Decision_<n>` IDs using `createInitialDmnXmlWithDecisionId()` and sync name↔ID via `dmn-support`.
+- DMN: Tabs start from `Decision_<n>` IDs using `createInitialDmnXmlWithDecisionId()`; model changes bump `modelVersion` in the store, triggering centralised sync/title effects.
 - Event: Tabs default to `Event_<n>` with an empty Flowable Event Registry model; the event editor keeps key and name in sync initially.
 
 ### Empty State
@@ -102,11 +107,11 @@ Quick anchors (open in IDE):
 ### Live Title Sync
 - BPMN: `commandStack.changed` triggers `deriveProcessIdFromModel()` → `updateStateTitle(...)`.
 - DMN: `dmn-support.ts` debounces name changes, updates IDs through the DMN modeling API, then refreshes tab titles.
-- Event: `EventEditor` calls `onDirtyChange` which in turn updates dirty markers; titles follow the event key/name set by the editor.
+- Event: `EventEditor` calls `onDirtyChange` which in turn updates dirty markers; titles follow the event key/name set by the editor and are mirrored into the store.
 
 ### Duplicate-Open Handling
 - `openXmlConsideringDuplicates(xml, fileName?, source)` detects BPMN vs DMN (`detectDiagramType`) and derives the relevant ID (`deriveProcessId` / `deriveDmnId`).
-- If a matching tab exists and is dirty, a confirm dialog gates overwriting; otherwise imports reuse the existing tab. Event JSON always opens into a new event tab via `openEventFile`.
+- If a matching tab exists and is dirty, a confirm dialog gates overwriting; otherwise imports reuse the existing tab. Event JSON always opens into a new event tab via `openEventFile`. Store state follows these open/overwrite paths automatically.
 
 ### Tauri‑Safe Confirm Dialogs
 - Use `showConfirmDialog(message, title?, options?)` instead of `window.confirm`. Styles live under `.tab-confirm-overlay` / `.tab-confirm` in `src/bpmn-tabs/tabs.css`.
@@ -117,9 +122,9 @@ Quick anchors (open in IDE):
 
 ### Tabs Do / Don’t
 - Do: Create/destroy modelling instances per tab; BPMN uses `BpmnModeler`, DMN uses the custom DMN modeler, event tabs use `EventEditor`.
-- Do: Route per-tab operations through `runWithState(state, ...)` exposed by `tab-manager`; rely on `updateBaseline`/`setDirtyState` to maintain host signals.
+- Do: Route per-tab operations through `runWithState(state, ...)` exposed by `tab-manager`; rely on `updateBaseline`/`setDirtyState` to maintain host signals. The store listens to these calls and keeps host/UI state in sync.
 - Don’t: Reuse `modeler` globals outside `runWithState`; event tabs expose their API through the stored `modeler` reference.
-- Don’t: Skip baseline updates—always call `updateBaseline(state)` after imports/saves (BPMN, DMN, and event).
+- Don’t: Skip baseline updates—always call `updateBaseline(state)` after imports/saves (BPMN, DMN, and event). The autosave effect assumes baselines are current.
 
 ### Markup & Styles
 - `index.html` now includes `.add-split` (split button + submenu) and `.start-tiles` inside `#emptyState` for the three diagram kinds.
