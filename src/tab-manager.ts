@@ -3,7 +3,7 @@ import { BpmnPropertiesPanelModule, BpmnPropertiesProviderModule } from 'bpmn-js
 import FlowablePropertiesProviderModule from './flowable-properties-provider';
 import flowableModdle from './flowable-moddle';
 import { createFlowableDmnModeler } from './dmn/dmn-factory';
-import { createEventEditor } from './event-editor/event-editor';
+import { createEventEditor, type EventModel } from './event-editor/event-editor';
 import { Tabs } from './bpmn-tabs/tabs';
 import { updateEmptyStateVisibility, showConfirmDialog, updateZoomButtonsVisibility } from './ui-controls';
 
@@ -80,6 +80,25 @@ function updateToolbarButtons(state: DiagramTabState | null) {
       }
     }
   }
+}
+
+function createDefaultEventModel(eventKey: string): EventModel {
+  return {
+    key: eventKey,
+    name: eventKey,
+    correlationParameters: [
+      {
+        name: 'businessKey',
+        type: 'string'
+      }
+    ],
+    payload: [
+      {
+        name: 'payload',
+        type: 'json'
+      }
+    ]
+  };
 }
 
 export function setActiveTab(id: string | null) {
@@ -266,12 +285,7 @@ export function createNewDiagram(kind: 'bpmn' | 'dmn' | 'event' = 'bpmn') {
       title: eventKey,
       statusMessage: 'Neuer Event-Tab erstellt',
       kind: 'event',
-      eventModel: {
-        key: eventKey,
-        name: eventKey, // Key and name should be the same
-        correlationParameters: [],
-        payload: []
-      }
+      eventModel: createDefaultEventModel(eventKey)
     });
   } else {
     const computeNextProcessId = (window as any).computeNextProcessId;
@@ -358,12 +372,7 @@ export function initTabs() {
         const eventId = init?.title || `Event_${tabSequence}`;
 
         // Use provided event model or create default
-        const eventModel = init?.eventModel || {
-          key: eventId,
-          name: eventId, // Key and name should be the same
-          correlationParameters: [],
-          payload: []
-        };
+        const eventModel = init?.eventModel || createDefaultEventModel(eventId);
 
         instance = createEventEditor(canvas, {
           model: eventModel,
