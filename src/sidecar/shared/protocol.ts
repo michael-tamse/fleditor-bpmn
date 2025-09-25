@@ -6,6 +6,7 @@ export const PROTOCOL_VERSION = '1.0.0' as const;
 
 export type OperationName =
   | 'doc.load'
+  | 'doc.loadMany'
   | 'doc.save'
   | 'doc.saveSvg'
   | 'doc.openExternal'

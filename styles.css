@@ -92,7 +92,6 @@ html, body { height: 100%; }
   min-height: 0;
 }
 .tabpanel[aria-hidden="false"] {
-  display: block;
   overflow: auto;
 }
 

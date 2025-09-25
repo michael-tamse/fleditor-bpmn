@@ -229,7 +229,19 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
           throw importError;
         }
         runWithState(state, () => {
-          try { state.modeler.get('canvas').zoom('fit-viewport', 'auto'); } catch {}
+          try {
+            const canvas = state.modeler.get('canvas');
+            if (!canvas) return;
+            if (canvas.zoom) {
+              canvas.zoom('fit-viewport', 'auto');
+            }
+            if (typeof canvas.resized === 'function') {
+              canvas.resized();
+              requestAnimationFrame(() => {
+                try { canvas.resized(); } catch {}
+              });
+            }
+          } catch {}
         });
       }
     }

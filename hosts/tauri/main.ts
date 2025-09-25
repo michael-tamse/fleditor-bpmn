@@ -132,6 +132,7 @@ function isTauri(): boolean {
         },
         operations: [
           { name: 'doc.load' },
+          { name: 'doc.loadMany' },
           { name: 'doc.save' },
           { name: 'doc.saveSvg' },
           // host-initiated open of external files
@@ -291,6 +292,46 @@ function isTauri(): boolean {
     } catch (e) {
       try { console.debug('[tauri-host]', 'doc.load error', e); } catch {}
       return '';
+    }
+  });
+
+  // Implement doc.loadMany -> open dialog (multiple) + read files
+  host.onRequest('doc.loadMany', async () => {
+    try { console.debug('[tauri-host]', 'doc.loadMany request'); } catch {}
+    if (!isTauri()) return { items: [] } as any;
+    try {
+      const sel = await open({
+        filters: [
+          { name: 'BPMN', extensions: ['bpmn', 'bpmn20.xml'] },
+          { name: 'DMN', extensions: ['dmn'] },
+          { name: 'Event', extensions: ['event'] },
+          { name: 'XML', extensions: ['xml'] }
+        ],
+        multiple: true
+      });
+      const paths = Array.isArray(sel) ? sel : (sel ? [sel] : []);
+      if (!paths.length) { try { console.debug('[tauri-host]', 'doc.loadMany canceled'); } catch {} return { canceled: true } as any; }
+
+      const items: Array<{ xml?: string; json?: string; fileName?: string }> = [];
+      for (const p of paths) {
+        try {
+          const content = await readTextFile(p as string);
+          const parts = String(p).split(/[\/\\]/);
+          const fileName = parts[parts.length - 1] || 'diagram.bpmn20.xml';
+          if (fileName.toLowerCase().endsWith('.event')) {
+            items.push({ json: String(content ?? ''), fileName });
+          } else {
+            items.push({ xml: String(content ?? ''), fileName });
+          }
+        } catch (e) {
+          try { console.debug('[tauri-host]', 'doc.loadMany: failed to read', p, e); } catch {}
+        }
+      }
+      try { console.debug('[tauri-host]', 'doc.loadMany ok', { count: items.length }); } catch {}
+      return { items } as any;
+    } catch (e) {
+      try { console.debug('[tauri-host]', 'doc.loadMany error', e); } catch {}
+      return { items: [] } as any;
     }
   });
 

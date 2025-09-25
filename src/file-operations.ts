@@ -228,10 +228,6 @@ export function triggerOpen() {
   const input = document.querySelector<HTMLInputElement>('#file-input');
   if (!input) return;
   input.value = '';
-  input.onchange = () => {
-    const file = input.files?.[0];
-    if (file) openFileAsTab(file);
-  };
   input.click();
 }
 
@@ -547,8 +543,42 @@ export async function openViaSidecarOrFile() {
   }
 
   try {
-    debug('open: request host doc.load');
+    // Try multi-file first
+    debug('open: request host doc.loadMany');
     const useSidecar = (window as any).sidecar || sidecar;
+    let handled = false;
+    try {
+      const resMany: any = await useSidecar!.request('doc.loadMany', undefined, 120000);
+      const items: any[] = Array.isArray(resMany) ? resMany : (Array.isArray(resMany?.items) ? resMany.items : []);
+      const canceled = !!resMany?.canceled;
+      if (canceled) {
+        debug('open: host doc.loadMany canceled by user');
+        setStatus('Öffnen abgebrochen');
+        return;
+      }
+      if (items.length) {
+        debug('open: host doc.loadMany returned', { count: items.length });
+        for (const it of items) {
+          try {
+            const fileName = typeof it?.fileName === 'string' ? sanitizeFileName(it.fileName) : undefined;
+            if (typeof it?.json === 'string' && it.json.trim()) {
+              await openEventFile(it.json, fileName || 'event.event', 'host');
+            } else if (typeof it?.xml === 'string' && it.xml.trim()) {
+              await openXmlConsideringDuplicates(it.xml, fileName, 'host');
+            }
+          } catch (e) {
+            debug('open: failed to import one item; continuing', e);
+          }
+        }
+        handled = true;
+        return;
+      }
+    } catch (e) {
+      debug('open: host doc.loadMany failed; will try doc.load', e);
+    }
+
+    // Fallback to single-file load via host
+    debug('open: request host doc.load (fallback)');
     const res: any = await useSidecar!.request('doc.load', undefined, 120000);
     let xml: string | undefined;
     let json: string | undefined;

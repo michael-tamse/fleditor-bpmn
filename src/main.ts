@@ -366,9 +366,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // File Input
   const fileInput = document.querySelector('#file-input') as HTMLInputElement;
   if (fileInput) {
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files?.[0];
-      if (file) openFileAsTab(file);
+    fileInput.addEventListener('change', async () => {
+      const files = fileInput.files ? Array.from(fileInput.files) : [];
+      for (const f of files) {
+        await openFileAsTab(f);
+      }
     });
   }
 
