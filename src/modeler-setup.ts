@@ -5,6 +5,8 @@ import {
   deriveDmnId,
   applyImportTransformations
 } from './bpmn-xml-utils';
+import { installImportModelTransformations } from './model-transformations';
+export { sanitizeModel } from './bpmn-xml-utils';
 
 import { DiagramTabState, DiagramInit } from './types';
 
@@ -170,7 +172,7 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
   // Fix: if init.xml is an object, it might be a DiagramInit or similar, extract the actual XML
   if (typeof xml === 'object' && xml !== null) {
     console.log('[Debug] init.xml is object, trying to extract XML string');
-    xml = null; // Force fallback to initial XML
+    xml = state.kind === 'dmn' ? initialDmnXml : initialXml; // Use fallback immediately
   }
 
   if (!xml) {
@@ -249,6 +251,11 @@ export function setupModelerForState(state: DiagramTabState) {
     return;
   }
 
+  if (state.kind === 'event') {
+    // Event tabs don't need modeler setup - they use a custom editor
+    return;
+  }
+
   const runWithState = (window as any).runWithState;
   if (runWithState) {
     runWithState(state, () => {
@@ -259,6 +266,7 @@ export function setupModelerForState(state: DiagramTabState) {
         }
       } catch {}
       customizeProviders(state.modeler);
+      installImportModelTransformations(state.modeler);
     });
   }
   bindModelerEvents(state);
@@ -481,10 +489,6 @@ export function customizeProviders(currentModeler?: any) {
   } catch (e) {
     console.warn('Palette/ContextPad customization failed:', e);
   }
-}
-
-export function sanitizeModel() {
-  // Placeholder - actual implementation would be here
 }
 
 export const initialXml = `<?xml version="1.0" encoding="UTF-8"?>

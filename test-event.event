@@ -1,0 +1,32 @@
+{
+  "key": "testPaymentEvent",
+  "name": "Test Payment Event",
+  "correlationParameters": [
+    {
+      "name": "customerId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    }
+  ],
+  "payload": [
+    {
+      "name": "amount",
+      "type": "double"
+    },
+    {
+      "name": "currency",
+      "type": "string"
+    },
+    {
+      "name": "timestamp",
+      "type": "string"
+    },
+    {
+      "name": "metadata",
+      "type": "json"
+    }
+  ]
+}

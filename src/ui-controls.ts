@@ -1,4 +1,4 @@
-import { DiagramTabState } from './types';
+import { DiagramTabState, ToolbarSlot } from './types';
 
 let modeler: any = null;
 let menubarVisible = true;
@@ -148,29 +148,57 @@ function getActiveState() {
   return (window as any).getActiveState?.();
 }
 
-export function updateZoomButtonsVisibility() {
+export function updateToolbarExtras() {
+  const toolbarContainer = document.querySelector<HTMLElement>('.toolbar__right');
+  if (!toolbarContainer) return;
+
   const activeState = getActiveState();
-  const zoomButtons = [
-    document.querySelector('#btn-zoom-in'),
-    document.querySelector('#btn-zoom-out'),
-    document.querySelector('#btn-zoom-reset'),
-    document.querySelector('#btn-fit')
-  ];
+  const targetSlot: ToolbarSlot | null = activeState?.toolbarSlot ?? null;
 
-  const shouldShow = activeState && activeState.kind === 'bpmn';
-
-  zoomButtons.forEach(btn => {
-    if (btn) {
-      (btn as HTMLElement).style.display = shouldShow ? '' : 'none';
+  if (!targetSlot) {
+    if (toolbarContainer.childElementCount > 0) {
+      toolbarContainer.replaceChildren();
     }
-  });
-
-  // Also hide/show the divider before zoom buttons
-  const dividers = document.querySelectorAll('.toolbar__right .divider');
-  if (dividers.length > 0) {
-    const lastDivider = dividers[dividers.length - 1] as HTMLElement;
-    lastDivider.style.display = shouldShow ? '' : 'none';
+    toolbarContainer.style.display = 'none';
+    return;
   }
+
+  toolbarContainer.style.display = 'flex';
+  toolbarContainer.replaceChildren();
+
+  const renderer = toolbarRenderers[targetSlot];
+  if (renderer) {
+    renderer(toolbarContainer);
+  }
+}
+
+const toolbarRenderers: Record<ToolbarSlot, (container: HTMLElement) => void> = {
+  'bpmn-controls': (container) => {
+    container.append(
+      createToolbarButton('btn-save-svg', 'Speichern SVG', 'Als SVG speichern'),
+      createDivider(),
+      createToolbarButton('btn-zoom-out', '−', 'Verkleinern'),
+      createToolbarButton('btn-zoom-reset', '100%', '100%'),
+      createToolbarButton('btn-zoom-in', '+', 'Vergrößern'),
+      createDivider(),
+      createToolbarButton('btn-fit', 'Fit', 'Auf Ansicht einpassen')
+    );
+  }
+};
+
+function createToolbarButton(id: string, label: string, title: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.id = id;
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.title = title;
+  return btn;
+}
+
+function createDivider(): HTMLSpanElement {
+  const divider = document.createElement('span');
+  divider.className = 'divider';
+  return divider;
 }
 
 export function getMenubarVisible(): boolean {

@@ -82,9 +82,104 @@ function findTabByProcessId(pid: string): DiagramTabState | null {
   return findFn ? findFn(pid) : null;
 }
 
+function findEventTabByKey(key: string): DiagramTabState | null {
+  const findFn = (window as any).findEventTabByKey;
+  return findFn ? findFn(key) : null;
+}
+
 function createDiagramTab(init: DiagramInit) {
   const createFn = (window as any).createDiagramTab;
   if (createFn) createFn(init);
+}
+
+export async function openEventFile(jsonContent: string, fileName: string, source: 'file' | 'host' | 'external' = 'file') {
+  try {
+    const eventModel = JSON.parse(jsonContent);
+
+    // Validate basic structure
+    if (!eventModel || typeof eventModel !== 'object') {
+      throw new Error('Invalid event file: not a valid JSON object');
+    }
+
+    // Ensure required fields exist
+    const model = {
+      key: eventModel.key || 'event',
+      name: eventModel.name || 'Event',
+      correlationParameters: Array.isArray(eventModel.correlationParameters)
+        ? eventModel.correlationParameters
+        : [],
+      payload: Array.isArray(eventModel.payload)
+        ? eventModel.payload
+        : []
+    };
+
+    const eventKey = model.key || 'event';
+    const safeFileName = fileName ? sanitizeFileName(fileName) : undefined;
+    const existing = findEventTabByKey(eventKey);
+
+    const statusLabel = fileName || safeFileName || eventKey;
+    const derivedTitle = model.name || eventKey || (fileName ? fileName.replace(/\.event$/i, '') : 'Event');
+
+    const init: DiagramInit = {
+      title: derivedTitle,
+      fileName: safeFileName,
+      statusMessage: `Event-Definition geladen: ${statusLabel}`,
+      kind: 'event',
+      eventModel: model  // Pass the event model to initialization
+    };
+
+    debug(`open-event: prepared import from ${source}`, { fileName, modelKey: model.key, existing: !!existing });
+
+    if (!existing) {
+      const createFn = (window as any).createDiagramTab;
+      if (createFn) createFn(init);
+      return;
+    }
+
+    if (safeFileName && existing.fileName && sanitizeFileName(existing.fileName) !== safeFileName) {
+      const titleMsg = `${eventKey ? `[${eventKey}] ` : ''}Gleiches Event geöffnet`;
+      const ok = await showConfirmDialog(
+        'Ein Event mit gleicher ID ist bereits geöffnet. Neues Tab öffnen?',
+        titleMsg,
+        { okLabel: 'Neuer Tab', okVariant: 'primary', cancelLabel: 'Im vorhandenen Tab überschreiben' }
+      );
+      if (ok) {
+        const createFn = (window as any).createDiagramTab;
+        if (createFn) createFn(init);
+        return;
+      }
+    }
+
+    if (existing.dirty) {
+      const titleMsg = `${eventKey ? `[${eventKey}] ` : ''}Event überschreiben?`;
+      const ok = await showConfirmDialog('Es gibt ungespeicherte Änderungen. Änderungen überschreiben?', titleMsg, { okLabel: 'Ja' });
+      if (!ok) {
+        setStatus('Öffnen abgebrochen');
+        const tabsControl = (window as any).tabsControl;
+        tabsControl?.activate(existing.id);
+        return;
+      }
+    }
+
+    if (existing.modeler && typeof existing.modeler.setModel === 'function') {
+      existing.modeler.setModel(model);
+    }
+
+    const newTitle = model.name || eventKey || existing.title;
+    existing.fileName = safeFileName || existing.fileName;
+    const tabsControl = (window as any).tabsControl;
+    tabsControl?.activate(existing.id);
+    const updateStateTitle = (window as any).updateStateTitle;
+    if (updateStateTitle) updateStateTitle(existing, newTitle);
+
+    await updateBaseline(existing);
+
+    setStatus(`Event-Definition geladen: ${statusLabel}`);
+  } catch (error) {
+    console.error('Error opening event file:', error);
+    setStatus(`Fehler beim Öffnen der Event-Datei: ${(error as Error).message}`);
+    throw error;
+  }
 }
 
 export async function openFileAsTab(file: File) {
@@ -92,7 +187,13 @@ export async function openFileAsTab(file: File) {
   try {
     const raw = await file.text();
     const fileName = sanitizeFileName(file.name || 'diagram.bpmn20.xml');
-    await openXmlConsideringDuplicates(raw, fileName, 'file');
+
+    // Check if it's an event file
+    if (fileName.toLowerCase().endsWith('.event')) {
+      await openEventFile(raw, fileName, 'file');
+    } else {
+      await openXmlConsideringDuplicates(raw, fileName, 'file');
+    }
   } catch (err) {
     console.error(err);
     alert('Fehler beim Import der Datei.');
@@ -273,28 +374,36 @@ export async function saveXML() {
   const state = getActiveState();
   if (!state) return;
   try {
-    const withFlowableHeader = await prepareXmlForExport();
+    const content = await prepareXmlForExport();
     debug('save: browser download fallback');
 
-    let id: string | null;
-    let extension: string;
-    if (state.kind === 'dmn') {
-      id = deriveDmnId(withFlowableHeader);
-      extension = '.dmn';
+    let fileName: string;
+    let mimeType: string;
+
+    if (state.kind === 'event') {
+      // For event files, use the event key as filename
+      const eventModel = state.modeler.getModel();
+      const eventKey = eventModel.key || 'event';
+      fileName = sanitizeFileName(eventKey + '.event');
+      mimeType = 'application/json';
+    } else if (state.kind === 'dmn') {
+      const id = deriveDmnId(content);
+      fileName = sanitizeFileName((id || 'decision') + '.dmn');
+      mimeType = 'application/xml';
     } else {
-      id = deriveProcessId(withFlowableHeader);
-      extension = '.bpmn20.xml';
+      const id = deriveProcessId(content);
+      fileName = sanitizeFileName((id || 'diagram') + '.bpmn20.xml');
+      mimeType = 'application/xml';
     }
 
-    const name = sanitizeFileName((id || 'diagram') + extension);
-    download(name, withFlowableHeader, 'application/xml');
-    state.fileName = name;
+    download(fileName, content, mimeType);
+    state.fileName = fileName;
     persistActiveTab(state);
     await updateBaseline(state);
-    setStatus('XML exportiert');
+    setStatus(state.kind === 'event' ? 'Event-Definition gespeichert: ' + fileName : 'XML exportiert');
   } catch (err) {
     console.error(err);
-    alert('Fehler beim Export als XML');
+    alert(state.kind === 'event' ? 'Fehler beim Export der Event-Definition' : 'Fehler beim Export als XML');
   }
 }
 
@@ -381,6 +490,18 @@ export async function prepareXmlForExport(): Promise<string> {
   const state = getActiveState();
   if (!state) throw new Error('No active diagram state');
 
+  if (state.kind === 'event') {
+    // For event tabs, get JSON from the event editor
+    const eventModel = state.modeler.getModel();
+    const json = JSON.stringify(eventModel, null, 2);
+    debug('Event save: JSON export prepared', {
+      size: json.length,
+      key: eventModel.key,
+      name: eventModel.name
+    });
+    return json;
+  }
+
   if (state.kind === 'dmn') {
     const { xml } = await state.modeler.saveXML({ format: true });
     const syncedXml = syncDmnDecisionIdWithName(xml);
@@ -430,18 +551,26 @@ export async function openViaSidecarOrFile() {
     const useSidecar = (window as any).sidecar || sidecar;
     const res: any = await useSidecar!.request('doc.load', undefined, 120000);
     let xml: string | undefined;
+    let json: string | undefined;
     let fileName: string | undefined;
     let canceled = false;
     if (typeof res === 'string') {
       xml = res;
     } else if (res && typeof res === 'object') {
       if (typeof res.xml === 'string') xml = res.xml;
+      if (typeof res.json === 'string') json = res.json;
       if (typeof res.fileName === 'string') fileName = sanitizeFileName(res.fileName);
       if (res.canceled === true) canceled = true;
     }
     if (typeof xml === 'string' && xml.trim()) {
       debug('open: host response', { length: xml.length, fileName });
       await openXmlConsideringDuplicates(xml, fileName, 'host');
+      return;
+    }
+    if (typeof json === 'string' && json.trim()) {
+      const resolvedName = fileName || 'event.event';
+      debug('open: host response (event)', { length: json.length, fileName: resolvedName });
+      await openEventFile(json, resolvedName, 'host');
       return;
     }
     if (canceled) {
@@ -461,10 +590,16 @@ export async function saveXMLWithSidecarFallback() {
   const state = getActiveState();
   if (!state) return;
   try {
-    const xml = await prepareXmlForExport();
+    const content = await prepareXmlForExport();
     if (hostAvailable() && sidecar) {
-      debug('save: request host doc.save', { size: xml.length });
-      const res: any = await sidecar.request('doc.save', { xml, diagramType: state.kind }, 120000);
+      debug('save: request host doc.save', { size: content.length });
+
+      // For event files, send JSON data with event type
+      const saveData = state.kind === 'event'
+        ? { json: content, diagramType: state.kind }
+        : { xml: content, diagramType: state.kind };
+
+      const res: any = await sidecar.request('doc.save', saveData, 120000);
       if (res && res.ok) {
         debug('save: host ok', { path: (res && res.path) || undefined });
         const path = typeof res.path === 'string' ? res.path : undefined;

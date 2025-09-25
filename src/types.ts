@@ -13,7 +13,10 @@ export interface DiagramTabState {
   dirtyTimer?: any;
   isImporting: boolean;
   lastImportTime?: number;
+  toolbarSlot?: ToolbarSlot | null;
 }
+
+export type ToolbarSlot = 'bpmn-controls';
 
 export interface DiagramInit {
   title: string;
@@ -22,6 +25,7 @@ export interface DiagramInit {
   statusMessage?: string;
   activate?: boolean;
   kind?: 'bpmn' | 'dmn' | 'event';
+  eventModel?: any; // For event-specific initialization data
 }
 
 export interface SidecarBridge {

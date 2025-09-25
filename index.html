@@ -18,18 +18,11 @@
     <header class="toolbar">
       <div class="toolbar__left">
         <button id="btn-open" title="BPMN-Datei öffnen">Öffnen</button>
-        <input id="file-input" type="file" accept=".bpmn,.xml,.bpmn20.xml,.dmn" hidden />
+        <input id="file-input" type="file" accept=".bpmn,.xml,.bpmn20.xml,.dmn,.event" hidden />
         <span class="divider"></span>
-        <button id="btn-save-xml" title="Als BPMN speichern">Speichern XML</button>
-        <button id="btn-save-svg" title="Als SVG speichern">Speichern SVG</button>
+        <button id="btn-save-xml" title="Als BPMN speichern">Speichern</button>
       </div>
-      <div class="toolbar__right">
-        <button id="btn-zoom-out" title="Verkleinern">−</button>
-        <button id="btn-zoom-reset" title="100%">100%</button>
-        <button id="btn-zoom-in" title="Vergrößern">+</button>
-        <span class="divider"></span>
-        <button id="btn-fit" title="Auf Ansicht einpassen">Fit</button>
-      </div>
+      <div class="toolbar__right"></div>
     </header>
 
     <main class="editor">

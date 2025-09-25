@@ -1,7 +1,44 @@
+import { store } from './state/rootStore';
+import type { TabState } from './state/types';
 import { DiagramTabState } from './types';
 
 let tabsControl: any = null;
 let modeler: any = null;
+
+// Per-tab locks to prevent sync during ID updates
+const updatingIdByTab = new WeakMap<DiagramTabState, boolean>();
+
+const lastKnownNameByTabId = new Map<string, string>();
+const pendingSyncByTabId = new Map<string, ReturnType<typeof setTimeout>>();
+const lastModelVersionByTabId = new Map<string, number>();
+
+store.subscribe(() => {
+  const appState = store.getState();
+
+  for (const [tabId, timer] of pendingSyncByTabId.entries()) {
+    if (!appState.tabs[tabId]) {
+      clearTimeout(timer);
+      pendingSyncByTabId.delete(tabId);
+    }
+  }
+
+  for (const [tabId] of lastModelVersionByTabId.entries()) {
+    if (!appState.tabs[tabId]) {
+      lastModelVersionByTabId.delete(tabId);
+      lastKnownNameByTabId.delete(tabId);
+    }
+  }
+
+  Object.values(appState.tabs)
+    .filter((tab: TabState) => tab.kind === 'dmn')
+    .forEach((tab) => {
+      const previousVersion = lastModelVersionByTabId.get(tab.id);
+      if (previousVersion === undefined || previousVersion !== tab.modelVersion) {
+        lastModelVersionByTabId.set(tab.id, tab.modelVersion);
+        scheduleStoreDrivenSync(tab.id);
+      }
+    });
+});
 
 export function setTabsControl(control: any) {
   tabsControl = control;
@@ -11,38 +48,116 @@ export function setModeler(m: any) {
   modeler = m;
 }
 
+function resolveTabState(tabId: string): DiagramTabState | null {
+  try {
+    const getTabStates = (window as any).getTabStates;
+    const map = getTabStates?.();
+    if (map && typeof map.get === 'function') {
+      return map.get(tabId) ?? null;
+    }
+  } catch (error) {
+    console.warn('Failed to resolve DMN tab state:', error);
+  }
+  return null;
+}
+
+function scheduleStoreDrivenSync(tabId: string) {
+  const existing = pendingSyncByTabId.get(tabId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    pendingSyncByTabId.delete(tabId);
+    const tabState = resolveTabState(tabId);
+    if (!tabState) return;
+
+    try { syncDmnDecisionIdWithName(tabState); } catch (error) { console.warn('DMN sync via store failed:', error); }
+    try { updateDmnTabTitle(tabState); } catch (error) { console.warn('DMN title via store failed:', error); }
+  }, 180);
+
+  pendingSyncByTabId.set(tabId, timer);
+}
+
 export function syncDmnDecisionIdWithName(state: DiagramTabState) {
-  if (!state.modeler) return;
+  // Only run for DMN tabs
+  if (state.kind !== 'dmn' || !state.modeler) return;
+
+  // Don't sync if we're currently updating the ID for this tab (prevents circular updates)
+  if (updatingIdByTab.get(state)) {
+    return;
+  }
+
+  performDmnSyncInternal(state, false);
+}
+
+export function syncDmnDecisionIdWithNameImmediate(state: DiagramTabState): string | null {
+  performDmnSyncInternal(state, true);
+  // Return the current ID after sync
+  try {
+    const activeView = state.modeler?.getActiveView();
+    if (activeView && activeView.element && activeView.element.id) {
+      return String(activeView.element.id);
+    }
+  } catch {}
+  return null;
+}
+
+function performDmnSyncInternal(state: DiagramTabState, immediate: boolean = false) {
+  if (state.kind !== 'dmn' || !state.modeler) return;
 
   try {
     const activeView = state.modeler.getActiveView();
     if (!activeView || !activeView.element) return;
 
     const decision = activeView.element;
-    if (!decision || !decision.name) return;
+    if (!decision) return;
 
-    const currentName = String(decision.name).trim();
+    const currentName = (decision.name || '').trim();
     const currentId = String(decision.id || '');
 
-    // Only sync if name is different from ID and name is not empty
+    // Early exits
+    if (!immediate && updatingIdByTab.get(state)) return;
+    const tabKey = state.id;
+    if (!immediate && lastKnownNameByTabId.get(tabKey) === currentName) return;
     if (!currentName || currentName === currentId) return;
 
     // Create a sanitized ID from the name
-    const sanitizedId = currentName
+    const base = currentName
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .replace(/^[^a-zA-Z_]/, '_')
       .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '') || 'Decision_1';
+      .replace(/^_|_$/g, '');
 
-    // Update the decision ID to match the name
-    if (decision.id !== sanitizedId) {
-      console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${sanitizedId}"`);
-      decision.id = sanitizedId;
+    // Check for ID collisions using ElementRegistry
+    const viewer = state.modeler.getActiveViewer();
+    const elementRegistry = viewer?.get('elementRegistry');
+    let newId = base || 'Decision_1';
+    if (elementRegistry?.get(newId)) {
+      let i = 2;
+      while (elementRegistry.get(`${base}_${i}`)) i++;
+      newId = `${base}_${i}`;
+    }
 
-      // Also update $attrs if it exists
-      if (decision.$attrs) {
-        decision.$attrs.id = sanitizedId;
+    // Update ID via Modeling API (not direct mutation)
+    if (decision.id !== newId) {
+      console.log(`DMN Sync: Updating decision ID from "${decision.id}" to "${newId}"`);
+
+      const modeling = viewer?.get('modeling');
+      if (!modeling) return;
+
+      // Set lock to prevent circular updates for this tab
+      if (!immediate) updatingIdByTab.set(state, true);
+
+      try {
+        modeling.updateProperties(decision, { id: newId });
+        lastKnownNameByTabId.set(tabKey, currentName);
+      } finally {
+        // Clear lock after a short delay to allow events to settle
+        if (!immediate) {
+          setTimeout(() => updatingIdByTab.set(state, false), 50);
+        }
       }
+    } else {
+      lastKnownNameByTabId.set(tabKey, currentName);
     }
   } catch (e) {
     console.warn('Failed to sync DMN decision ID with name:', e);
@@ -50,49 +165,51 @@ export function syncDmnDecisionIdWithName(state: DiagramTabState) {
 }
 
 export function updateDmnTabTitle(state: DiagramTabState) {
-  if (!tabsControl || !state.id) {
-    console.log('DMN Tab Title: Missing tabsControl or state.id');
+  if (!state?.id) {
     return;
   }
 
   try {
-    console.log('DMN Tab Title: Updating for state:', state.id);
-
-    const activeView = state.modeler.getActiveView();
-    console.log('DMN Tab Title: Active view:', activeView);
-
+    const activeView = state.modeler?.getActiveView?.();
     if (!activeView) {
-      console.log('DMN Tab Title: No active view');
       return;
     }
 
     const decision = activeView.element;
-    console.log('DMN Tab Title: Decision element:', decision);
-
     if (!decision) {
-      console.log('DMN Tab Title: No decision element');
       return;
     }
 
-    let title = 'DMN Entscheidung';
-
-    console.log('DMN Tab Title: Decision properties:', {
-      id: decision.id,
-      name: decision.name,
-      $attrs: decision.$attrs,
-      keys: Object.keys(decision)
-    });
+    let baseTitle = 'DMN Entscheidung';
 
     if (decision.name && decision.name.trim()) {
-      title = decision.name.trim();
+      baseTitle = decision.name.trim();
     } else if (decision.id) {
-      title = decision.id;
+      baseTitle = String(decision.id);
     } else if (decision.$attrs && decision.$attrs.id) {
-      title = decision.$attrs.id;
+      baseTitle = String(decision.$attrs.id);
     }
 
-    console.log('DMN Tab Title: Setting title to:', title);
-    tabsControl.setTitle(state.id, title);
+    const updateStateTitle = (window as any).updateStateTitle;
+    if (typeof updateStateTitle === 'function') {
+      updateStateTitle(state, baseTitle);
+    } else {
+      state.title = baseTitle;
+    }
+
+    const control = tabsControl ?? (window as any).tabsControl;
+    if (!control?.setTitle) {
+      return;
+    }
+
+    if (!tabsControl) {
+      tabsControl = control;
+    }
+
+    const storeTab = store.getState().tabs[state.id];
+    const displayTitle = storeTab?.dirty ? `* ${baseTitle}` : baseTitle;
+
+    control.setTitle(state.id, displayTitle);
   } catch (e) {
     console.warn('Failed to update DMN tab title:', e);
   }

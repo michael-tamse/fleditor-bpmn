@@ -3,12 +3,13 @@
 This document guides agents (and contributors) working on this BPMN editor. It covers the codebase layout, conventions, and how to safely make changes via the Codex CLI.
 
 ## Overview
-- Scope: Lightweight BPMN editor using `bpmn-js` + Properties Panel with Flowable-specific tweaks.
-- Goals: Keep UX simple, remove unsupported BPMN constructs, add Flowable-centric properties where helpful.
+- Scope: Lightweight Flowable modeller covering BPMN diagrams, DMN decision tables, and Event Registry JSON via dedicated tabs.
+- Goals: Keep UX simple, remove unsupported constructs, add Flowable-centric defaults/properties where helpful, and keep save/export output host-safe.
 - Style: Minimal, focused changes. Avoid broad refactors and keep behavior predictable.
 
 ## Tech Stack
-- Core: `bpmn-js`, `bpmn-js-properties-panel`, `@bpmn-io/properties-panel` (Preact-based entries)
+- Core: `bpmn-js`, `dmn-js`, `bpmn-js-properties-panel`, `@bpmn-io/properties-panel` (Preact-based entries)
+- Event Editor: bespoke TypeScript/Preact-lite component under `src/event-editor/` for Flowable Event Registry JSON
 - Build: Vite (Node 18+ recommended)
 - Language: TypeScript (ES modules)
  - Sidecar: Lightweight protocol + transports (DOM/postMessage) for embedding in Angular/Tauri/Browser hosts
@@ -22,39 +23,43 @@ This document guides agents (and contributors) working on this BPMN editor. It c
  - Tauri Dev: `npm run dev:tauri` (requires Rust + Tauri CLI). Dev server must bind `5173`.
 - Tauri Build: `npm run build:tauri`
  - App Bundle (macOS .app only): `npx @tauri-apps/cli@latest build --bundles app`
- - Windows Bundles:
+- Windows Bundles:
    - NSIS: `npm run build:win:nsis`
    - MSI (WiX v3 required): `npm run build:win:msi`
    - Both: `npm run build:win` (alias to `nsis,msi`)
+   - Legacy alias kept for CI: `npm run build:win:all`
 
 Note: Large bundle warnings are expected; not a blocker.
 
 ## Key Files
-- `src/main.ts`: App bootstrap, canvas + properties panel wiring, palette/context pad/replace menu filtering, file I/O, zoom. Also hosts import/export helpers (icon/DI fixes, XML rewrites) and small migrations/defaults.
+- `src/main.ts`: Lightweight orchestrator that wires toolbar, tab manager, sidecar bridge, and module globals; delegates actual model handling to specialised modules.
+- `src/tab-manager.ts`: Core tab lifecycle (create/activate/close) across BPMN, DMN, and Event tabs, integrates the accessible tab UI, toolbar button state, and tab persistence.
+- `src/change-tracker.ts`: Bridges tab instances into the global store, mirrors dirty markers to the UI/host, and delegates DMN bindings to `integrations/dmn-bridge`.
+- `src/state/`: Lightweight Redux-style store (`store.ts`, `types.ts`, `reducer.ts`, `selectors.ts`, `rootStore.ts`) centralising `activeTab`, dirty flags, selection IDs, and `modelVersion` counters; effects attach via `attachEffects(store)` to avoid circular imports.
+- `src/integrations/dmn-bridge.ts`: Single bind/unbind point for `dmn-js` (eventBus + commandStack) that dispatches selection/model changes and cleans listeners on destroy.
+- `src/effects/effects.ts`: Effect layer subscribed to the store (autosave scheduling, DMN title/ID sync, action ring buffer for debugging) – initialised via `attachEffects(store)`.
+- `src/util/throttle.ts`: Shared `throttle`/`debounce` helpers used by the bridge/effects.
+- `src/file-operations.ts`: Open/save flows (host + local), duplicate detection, event JSON handling, export preparation, and download fallbacks.
+- `src/modeler-setup.ts`: Per-tab modeler bootstrap (BPMN/DMN), drag & drop import, default Flowable injections for new shapes, and change-tracking wiring.
+- `src/model-transformations.ts`: Export-time Flowable rewrites invoked before saving (external-worker stencils, mapping normalisation, etc.).
+- `src/bpmn-xml-utils.ts`: Shared XML helpers for ID derivation, DI expansion, BPMN/DMN transformations, filename sanitising, and initial XML generation.
+- `src/dmn-support.ts`: DMN utilities (decision ID/name sync, tab title updates, initial DMN XML helpers).
+- `src/dmn/dmn-factory.ts`, `src/dmn-tab.ts`: Flowable-aware DMN modeler factory plus standalone web component used as DMN canvas.
+- `src/event-editor/`: Standalone Event Registry editor (TS + CSS + README) embedded in event tabs; exposes `createEventEditor` API and dirty tracking hooks.
+- `src/ui-controls.ts`: Toolbar actions, status/confirm UI, zoom helpers, property-panel visibility management, menubar toggling, and debug logging.
 - `src/flowable-moddle.ts`: Flowable moddle extension declaration (namespaces and types) including Event/Mapping/Variable Aggregation/Start Correlation types.
 - `src/flowable-properties-provider.ts`: Slim provider wrapper. Imports all contributors and runs them via `compose(...)`; no element-specific logic remains here.
 - `src/properties/helpers/entries.ts`: Central export surface for all properties-panel entry components. Contributors import from here for consistency.
-- `src/properties/contributors/`: Directory of focused contributor modules (service-task, call-activity, message events, error events, business-rule task, multi-instance, variable aggregations, etc.). Each contributor is pure and only mutates provided groups based on guard checks.
-- `styles.css`, `index.html`: Base UI shell.
-- Tabs (multi‑diagram support):
-  - `src/bpmn-tabs/tabs.ts`: Accessible tabs manager (add/activate/close, overflow scroll buttons, keyboard support, context menu, dirty marker).
-  - `src/bpmn-tabs/tabs.css`: Styles for tab bar, panels, overflow arrows, add button, context menu.
-  - `src/bpmn-tabs/tabs.html`: Markup reference used by `index.html`.
-  - `src/bpmn-tabs/tabs-usage-bpmn.ts`: Standalone demo usage for tabs + bpmn-js (not used by app boot, for reference/tests).
- - Sidecar (component ↔ host interface):
- - `src/sidecar/shared/protocol.ts`: PROTOCOL_ID/Version, message types (handshake, req/res, events, error), capabilities, operation names.
-   - `src/sidecar/transports/dom.ts`: DOM CustomEvent transport (Angular/same-window).
-   - `src/sidecar/transports/postMessage.ts`: postMessage transport (iframe/parent).
-   - `src/sidecar/transports/memory.ts`: Memory transport (tests).
-   - `src/sidecar/bridge.ts`: Thin request/response/event bridge with timeouts and handlers.
- - Browser Host Demo:
-   - `hosts/browser/index.html`: Host UI (buttons, toggles) + iframe embedding the editor.
-   - `hosts/browser/main.ts`: Host logic (handshake ack, ui ops, doc.load/save via downloads).
- - Tauri Host Harness (no UI):
-   - `hosts/tauri/main.ts`: Tauri v2 host harness. Handles `doc.load`, `doc.save`, `doc.saveSvg` using `@tauri-apps/plugin-dialog` and `@tauri-apps/plugin-fs`. Responds to `handshake:init`, listens for app‑level `open-files` events and forwards files to the component via `doc.openExternal`.
-   - Capabilities (permissions) are defined via files in `src-tauri/capabilities/` (see “Tauri v2 Capabilities”).
+- `src/properties/contributors/`: Focused contributor modules (service-task, call-activity, message events, error events, business-rule task, multi-instance, variable aggregations, etc.). Each contributor stays pure and only mutates provided groups based on guard checks.
+- Shell/UI assets: `styles.css`, `index.html` (toolbar, add-menu, start tiles), `src/bpmn-tabs/` (accessible tabs implementation and styles).
+- Sidecar bridge: `src/sidecar/shared/protocol.ts`, transports (`dom.ts`, `postMessage.ts`, `memory.ts`) and `src/sidecar/bridge.ts` for request/response plumbing.
+- Host harnesses: `hosts/browser/*` (iframe demo) and `hosts/tauri/main.ts` (Tauri v2 bridge + capabilities under `src-tauri/capabilities/`).
 
 Quick anchors (open in IDE):
+- `src/file-operations.ts` → open/save pipeline, duplicate detection, host fallbacks, event JSON support.
+- `src/tab-manager.ts` → multi-kind tab orchestration, toolbar states, dirty close prompts.
+- `src/dmn-support.ts` → DMN ID/name sync + tab title helpers.
+- `src/event-editor/` → embedded Flowable Event Registry editor (standalone API + styling).
 - `src/flowable-properties-provider.ts` → contains only the `FlowablePropertiesProvider` shell that logs, runs contributors, and returns the mutated `groups` array.
 - `src/properties/contributors/` → modular logic for all Flowable properties (execution flags, call activity, send/receive/message events, errors, business rule task, multi-instance, variable aggregations, etc.).
 - `src/properties/helpers/entries.ts` → shared re-exports for entry components; use this file when adding a new contributor.
@@ -65,8 +70,8 @@ Quick anchors (open in IDE):
 - Contributors must stay pure: no `useService` calls, only guard checks + group/entry mutations.
 - UI components live in `src/properties/entries/` and are exported through `helpers/entries.ts` so contributors share the same import path.
 - Helper modules (`helpers/dmn.ts`, `helpers/flowable-events.ts`, `helpers/variable-aggregations.ts`, etc.) encapsulate moddle access/manipulation for reuse across entries/contributors.
-- `src/main.ts` → modeler wiring, import/export helpers (`expandSubProcessShapesInDI`, CDATA wrappers, sendTask/DMN mappings, errorRef normalization/rewrite, external-worker stencil writer, icon helpers). Sidecar wiring: handshake init, ui ops handlers, `doc.load`/`doc.save`/`doc.saveSvg` fallbacks.
-- Tabs integration in `src/main.ts` → `DiagramTabState`, `initTabs`, `createDiagramTab`, per‑tab modeler lifecycle, dirty/baseline handling, last‑active persistence.
+- Modeler wiring spans `src/main.ts` (wiring), `src/modeler-setup.ts` (bootstrap + defaults), `src/model-transformations.ts` (export tweaks), and `src/bpmn-xml-utils.ts` (shared XML helpers).
+- Tab integration lives in `src/tab-manager.ts` with support modules (`change-tracker.ts`, `ui-controls.ts`, `file-operations.ts`); `main.ts` only exposes globals and sidecar glue.
  - Tauri integration:
    - `src-tauri/src/main.rs` → app builder, `tauri-plugin-single-instance`, `tauri-plugin-fs`, `tauri-plugin-dialog`, app‑level `open-files` emission, `pending_files_take` command.
    - `hosts/tauri/main.ts` → host bridge using plugin‑dialog/fs, drains `pending_files_take`, listens `open-files`, forwards via `doc.openExternal`.
@@ -74,82 +79,84 @@ Quick anchors (open in IDE):
    - Capabilities files: `src-tauri/capabilities/main.json` enables `event.listen`, `dialog.open/save`, `fs.read/write` for window `main`.
 
 ## Tabs (Multi‑Diagram)
-- Overview: The editor supports multiple BPMN diagrams in parallel via an accessible tab system. Each tab owns a separate `bpmn-js` Modeler and its Properties Panel.
-- Files: `src/bpmn-tabs/tabs.ts`, `src/bpmn-tabs/tabs.css`, `index.html` (tabbar markup), optional demo `src/bpmn-tabs/tabs-usage-bpmn.ts`.
+- Overview: Accessible tab system hosting BPMN modelers, DMN modelers, and the Event Registry editor side-by-side. Each tab owns its own modelling instance and layout (properties panel hidden automatically for event tabs).
+- Files: `src/tab-manager.ts` (lifecycle), `src/bpmn-tabs/tabs.ts`/`tabs.css` (UI widget), `index.html` (tab bar + add menu markup), optional demo `src/bpmn-tabs/tabs-usage-bpmn.ts`.
 - UX:
-  - Add button in the tabbar creates a new diagram tab.
-  - No auto-tab on startup and after closing the last tab. An empty state is shown when no tabs are open; use the `＋` button or "Öffnen" to start.
+  - `＋ Neues Diagramm` opens a split-button menu for BPMN, DMN, or Event tabs; the empty state exposes the same choices as tiles.
+  - No auto-tab on load or after closing the last tab. The empty state invites users to create/open content.
   - Context menu per tab: Close, Close Others, Close All. Ctrl/Cmd+W closes the active tab; middle‑click closes a tab.
-  - Overflow arrows appear when the tablist scrolls horizontally; keyboard nav uses Left/Right/Home/End and Enter/Space to activate.
-  - Dirty indicator (●) on tab when unsaved changes exist (tracked via hashed XML baseline).
-  - Properties panel visibility applies per active tab (layout stays consistent).
+  - Overflow arrows appear when the tablist scrolls; keyboard navigation uses Left/Right/Home/End and Enter/Space.
+  - Dirty indicator (●) per tab based on hashed baseline (XML/JSON depending on diagram kind).
+  - Toolbar buttons adapt to the active tab (Haupt-Button immer `Speichern`, SVG bleibt nur für BPMN aktiv) via `tab-manager`.
 - Integration:
-  - `src/main.ts` manages tabs via `DiagramTabState` objects stored in a Map: `{ id, modeler, panelEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash? }`.
-  - Use helpers: `runWithState(state, fn)` to execute logic against a specific modeler; `updateBaseline(state)` to reset dirty after save/import; `setDirtyState(state, dirty)` to update UI and emit `doc.changed` for the active tab.
-  - Active tab is persisted in `localStorage` (`fleditor:lastActiveTab`) with `{ title?, fileName? }` so the last active tab can be restored heuristically on reload.
-  - Host open (`doc.load`) creates a new tab with the received XML; local file open creates a new tab too. Drag & drop onto a canvas imports into that specific tab.
-  - Saving (host/browser) updates the tab’s baseline and clears dirty; suggested filenames derive from current `process@id` and are sanitized.
+- `DiagramTabState` includes `{ id, kind, modeler, panelEl, layoutEl, canvasEl, propertiesEl, title, fileName?, dirty, baselineHash?, isImporting }` stored in a shared Map owned by `tab-manager.ts`.
+- `change-tracker.ts` provides `setDirtyState`, `updateBaseline`, and DMN/event dirty scheduling; `main.ts` wires these helpers onto `window` for cross-module access.
+- `file-operations.ts` handles imports (host/local/drag-drop), runs duplicate checks via `openXmlConsideringDuplicates`, and updates baselines after save/import.
+- Active tab metadata persists in `localStorage` (`fleditor:lastActiveTab`) so reloads can re-activate a matching tab by title/file.
+- `modeler-setup.ts` bootstraps BPMN/DMN modelers per tab, binds drag/drop, and applies Flowable defaults when new shapes appear.
+- The store emits single-source-of-truth events (`TAB/*`, `EDITOR/*`); DMN dirty/title handling now listens via `effects.ts` instead of local debounces.
 
 ### New Tab Defaults
-- The `＋` button creates a fresh diagram whose `process@id` is unique across open tabs, following `Process_1`, `Process_2`, ... numbering. Implementation:
-  - `computeNextProcessId()` scans open tabs and picks the next free number.
-  - `createInitialXmlWithProcessId(pid)` derives an initial XML with both the `bpmn:process@id` and the DI `bpmnElement` set to `pid`.
-  - The tab title initializes from that Process ID.
+- BPMN: `computeNextProcessId()` scans open tabs, `createInitialXmlWithProcessId(pid)` fills IDs/DI, and tab titles default to the generated `Process_n` value.
+- DMN: Tabs start from `Decision_<n>` IDs using `createInitialDmnXmlWithDecisionId()`; model changes bump `modelVersion` in the store, triggering centralised sync/title effects.
+- Event: Tabs default to `Event_<n>` with an empty Flowable Event Registry model; the event editor keeps key and name in sync initially.
 
 ### Empty State
-- When there are no tabs, an empty-state hint is rendered inside `.panels` (see `index.html` `#emptyState`).
-- Visibility toggled via `updateEmptyStateVisibility()` whenever tabs are created/destroyed.
+- `#emptyState` inside `.panels` toggles via `updateEmptyStateVisibility()` and offers start tiles for BPMN, DMN, and Event documents.
 
 ### Live Title Sync
-- The tab title updates live when the BPMN `process@id` changes.
-  - Hooked on `commandStack.changed`; reads the id via `deriveProcessIdFromModel()` and calls `updateStateTitle(...)`.
+- BPMN: `commandStack.changed` triggers `deriveProcessIdFromModel()` → `updateStateTitle(...)`.
+- DMN: `dmn-support.ts` debounces name changes, updates IDs through the DMN modeling API, then refreshes tab titles.
+- Event: `EventEditor` calls `onDirtyChange` which in turn updates dirty markers; titles follow the event key/name set by the editor and are mirrored into the store.
 
 ### Duplicate-Open Handling
-- Opening BPMN XML (via host `doc.load` or local file) checks for an existing tab with the same Process ID:
-  - No existing tab → new tab is created.
-  - Existing and not dirty → the diagram is imported into that tab and the tab is activated.
-  - Existing and dirty → a confirm dialog asks whether to overwrite the changes; "Abbrechen" cancels the open.
-- Logic centralized in `openXmlConsideringDuplicates(xml, fileName?, source)`; tab lookup via `findTabByProcessId(pid)`.
+- `openXmlConsideringDuplicates(xml, fileName?, source)` detects BPMN vs DMN (`detectDiagramType`) and derives the relevant ID (`deriveProcessId` / `deriveDmnId`).
+- If a matching tab exists and is dirty, a confirm dialog gates overwriting; otherwise imports reuse the existing tab. Event JSON always opens into a new event tab via `openEventFile`. Store state follows these open/overwrite paths automatically.
 
 ### Tauri‑Safe Confirm Dialogs
-- Avoid native `window.confirm` in Tauri (not allowlisted). Use the in-app confirm overlay instead:
-  - `showConfirmDialog(message, title?, options?)` renders an accessible modal (`Esc` cancels, `Enter` confirms) and returns a Promise<boolean>.
-  - Button labels can be customized; duplicate-open uses `okLabel: 'Ja'`.
-  - Styles live in `src/bpmn-tabs/tabs.css` under `.tab-confirm-overlay` / `.tab-confirm`.
+- Use `showConfirmDialog(message, title?, options?)` instead of `window.confirm`. Styles live under `.tab-confirm-overlay` / `.tab-confirm` in `src/bpmn-tabs/tabs.css`.
 
 ### Toolbar & Buttons
-- The dedicated "Neu" button was removed; creation happens via the `＋` in the tabbar.
-- The `＋` tabbar button is centered via flex styles for crisp alignment.
+- The old "Neu" button is replaced by the `＋ Neues Diagramm` split button; `tab-manager` toggles submenu visibility and routes selections to `createNewDiagram(kind)`.
+- Zoom buttons auto-hide for DMN/Event tabs (`ui-controls.ts`), and the save button caption switches to `Speichern` for event tabs.
 
 ### Tabs Do / Don’t
-- Do: Create and destroy Modeler instances per tab; don’t share a singleton across tabs.
-- Do: Route all per‑tab operations via `runWithState(state, ...)` to ensure the correct modeler is active.
-- Do: When mutating model content before export, call the existing helpers (e.g., `ensureCallActivityDefaults()`, `ensureCorrelationParameterFor*`) inside the active state.
-- Don’t: Access `modeler`-globals from outside active tab context; set `modeler = state.modeler` via `runWithState` instead of reassigning globally.
-- Don’t: Bypass the tabs dirty/baseline helpers; always call `updateBaseline(state)` after successful imports/saves.
+- Do: Create/destroy modelling instances per tab; BPMN uses `BpmnModeler`, DMN uses the custom DMN modeler, event tabs use `EventEditor`.
+- Do: Route per-tab operations through `runWithState(state, ...)` exposed by `tab-manager`; rely on `updateBaseline`/`setDirtyState` to maintain host signals. The store listens to these calls and keeps host/UI state in sync.
+- Don’t: Reuse `modeler` globals outside `runWithState`; event tabs expose their API through the stored `modeler` reference.
+- Don’t: Skip baseline updates—always call `updateBaseline(state)` after imports/saves (BPMN, DMN, and event). The autosave effect assumes baselines are current.
 
 ### Markup & Styles
-- `index.html` swaps the single canvas for:
-  - `<div class="tabs" id="diagramTabs">` with a `.tabbar` holding left/right scroll buttons, the `.tablist`, and a `button.add-tab`.
-  - `.panels` contains per‑tab `.tabpanel` roots; each panel hosts a two‑column layout (`.diagram-pane`) with `.canvas` and `.properties`.
-- `styles.css` defines `.diagram-pane` and responsive behavior; `src/bpmn-tabs/tabs.css` styles the tabbar/panels.
+- `index.html` now includes `.add-split` (split button + submenu) and `.start-tiles` inside `#emptyState` for the three diagram kinds.
+- Each tab panel hosts a `.diagram-pane` wrapper with `.canvas`/`.properties`; event tabs receive `hide-properties` to collapse the properties column.
+- `styles.css` keeps the responsive layout; `src/bpmn-tabs/tabs.css` styles the tab bar, add menu, confirm dialog, and empty state tiles.
+
+## Event Editor
+- Location: `src/event-editor/` (TS component, CSS, README). The `createEventEditor` factory is consumed by `tab-manager.ts` when `DiagramTabState.kind === 'event'`.
+- Model: Flowable Event Registry JSON with `{ key, name, correlationParameters[], payload[] }`. Import via `.event` files or host `doc.openExternal` payloads.
+- API surface: returned editor exposes `getModel()`, `setModel(model)`, `setReadOnly(flag)`, `updateBaseline()`, and `dispose()`—the tab stores the instance in `state.modeler` for reuse.
+- Dirty tracking: `onDirtyChange` hooks into `change-tracker.setDirtyState`; `updateBaseline(state)` serialises JSON (pretty) to derive hashes.
+- Saving: `file-operations.prepareXmlForExport()` returns JSON for event tabs; host `doc.save` receives `{ json, diagramType: 'event' }`. Browser fallback downloads `<eventKey>.event`.
+- Toolbar: `tab-manager` renames the primary save button to `Speichern` and disables SVG export for event tabs automatically.
+- Styling: `event-editor/event-editor.css` blends with the core design system; adjust here when changing layout (BEM-style class names, CSS variables shared with `styles.css`).
 
 ## Sidecar Integration
 - Overview: The editor runs standalone, but can integrate with an external host (Angular, Tauri, Browser) via a versioned, bidirectional interface.
 - Protocol: `bpmn-sidecar` with `handshake:init/ack`, `req/res`, `event`, `error`. Capabilities declare available host features and operations.
 - Supported ops:
-  - `doc.load` (Comp → Host): host returns BPMN XML string.
-  - `doc.save` (Comp → Host): host persists XML.
-  - `doc.saveSvg` (Comp → Host): host persists SVG.
-  - `doc.openExternal` (Host → Comp): host forwards external file content + filename to open in a tab.
+  - `doc.load` (Comp → Host): host returns BPMN/DMN XML (`{ xml, fileName? }`); empty/invalid responses abort without local fallback.
+  - `doc.save` (Comp → Host): host persists BPMN/DMN XML (`{ xml, diagramType: 'bpmn' | 'dmn' }`) or Event JSON (`{ json, diagramType: 'event' }`).
+  - `doc.saveSvg` (Comp → Host): host persists BPMN SVG exports (`{ svg, suggestedName }`).
+  - `doc.openExternal` (Host → Comp): host forwards BPMN/DMN XML or Event JSON (`{ xml? , json?, fileName? }`) to open/merge in tabs.
   - `ui.setPropertyPanel` (Host → Comp): show/hide property panel.
   - `ui.setMenubar` (Host → Comp): show/hide editor menubar.
 - Events (Comp → Host): `ui.state` (menubar/propertyPanel flags), `doc.changed` (dirty hint).
 - Transports: DOM CustomEvents (same window), postMessage (iframe). Component auto-detects iframe and prefers postMessage.
-- Component wiring (in `src/main.ts`):
-  - Startup performs a handshake with short, frequent retries (800ms timeout, 250ms interval, up to 16 attempts) to avoid races; editor remains functional without a host.
-  - Open uses host-only: before invoking `doc.load`, the component waits up to ~2s for a host connection; if no host is available the action is aborted (no local dialog) to avoid dual prompts. Save/SVG use host-first and fall back to browser download only if the host declines or fails.
-  - UI requests update DOM and emit `ui.state` back to host.
+- Component wiring (`src/main.ts` + helpers):
+  - Startup performs repeated handshake attempts (800 ms timeout, 1 s retry) and once connected injects the sidecar instance into `file-operations` + `change-tracker` modules.
+  - Open is host-only: waits ~2 s for connection before falling back to the local file picker; if the host responds with empty payload the action aborts without showing a second dialog.
+  - Save/SVG run host-first (`doc.save`/`doc.saveSvg`) and revert to browser downloads on error/decline; event tabs skip SVG entirely and send JSON to the host.
+  - UI requests (`ui.setPropertyPanel`, `ui.setMenubar`) mutate layout via `ui-controls.ts` and immediately emit the current `ui.state` back to the host.
 
 ### Run the Browser Host Demo
 - Dev: `npm run dev`
@@ -158,7 +165,8 @@ Quick anchors (open in IDE):
   - The host iframe-loads `/index.html` (the editor) and sends `handshake:ack`.
   - Toggle menubar/property panel via checkboxes (host sends `ui.set*`).
   - „Datei in Host laden…“ puffert XML im Host; im Editor „Öffnen“ triggert `doc.load` → Host liefert XML.
-  - „Speichern XML“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` herunter (ersatzweise `diagram.bpmn20.xml`). Nach erfolgreichem Speichern setzt der aktive Tab seine Baseline (Dirty‑Dot verschwindet).
+  - „Speichern“ im Editor triggert `doc.save` → Host lädt `<processId>.bpmn20.xml` oder `<decisionId>.dmn` herunter (Fallback `diagram.*`). Nach erfolgreichem Speichern setzt der aktive Tab seine Baseline (Dirty‑Dot verschwindet).
+  - Event-Tabs senden `{ json, diagramType: 'event' }`; extend the host handler to export `<eventKey>.event` (the sample host currently ignores JSON, so editor-side download remains the reliable path).
   - „Speichern SVG“ im Editor triggert `doc.saveSvg` → Host lädt `<processId>.svg` herunter (ersatzweise `diagram.svg`).
 
 ### Host Security
@@ -430,6 +438,7 @@ This guide is intentionally concise. When in doubt, prefer small, targeted chang
   - External Worker: ensure pretty `extensionElements` contain the Design stencils (`stencilid=ExternalWorkerTask`, `stencilsuperid=Task`).
   - Error Events: write `errorRef` as `errorCode`; reconcile error definitions by removing unreferenced `<bpmn:error>` and adding missing ones (`id=name=errorCode=value`).
   - Normalize Flowable variable aggregation definitions to unprefixed `<variable/>` in XML.
+  - DMN export: sync decision IDs with names, wrap table values in CDATA, and strip DMNDI blocks for Flowable/Camunda tooling.
 
 ## Moddle Extensions (Flowable)
 - Added types used by the UI/export:
