@@ -232,7 +232,7 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
           try {
             const canvas = state.modeler.get('canvas');
             if (!canvas) return;
-            if (canvas.zoom) {
+            if (typeof canvas.zoom === 'function') {
               canvas.zoom('fit-viewport', 'auto');
             }
             if (typeof canvas.resized === 'function') {
@@ -243,6 +243,25 @@ export async function bootstrapState(state: DiagramTabState, init: DiagramInit) 
             }
           } catch {}
         });
+
+        const scheduleFit = () => {
+          if (!runWithState) return;
+          runWithState(state, () => {
+            try {
+              const canvas = state.modeler.get('canvas');
+              if (!canvas) return;
+              if (typeof canvas.zoom === 'function') {
+                canvas.zoom('fit-viewport', 'auto');
+              }
+              if (typeof canvas.resized === 'function') {
+                canvas.resized();
+              }
+            } catch {}
+          });
+        };
+
+        requestAnimationFrame(scheduleFit);
+        setTimeout(scheduleFit, 100);
       }
     }
     if (updateBaseline) await updateBaseline(state);
