@@ -1,6 +1,28 @@
 // Central factory for creating DmnJS instances with consistent Flowable/JUEL configuration
 import DmnJS from 'dmn-js/lib/Modeler';
 
+class DisabledSimpleMode {
+  constructor() {}
+
+  registerProvider() {}
+
+  canSimpleEdit() {
+    return false;
+  }
+}
+
+(DisabledSimpleMode as any).$inject = [
+  'components',
+  'contextMenu',
+  'elementRegistry',
+  'eventBus',
+  'renderer'
+];
+
+const disableSimpleModeModule: any = {
+  simpleMode: ['type', DisabledSimpleMode]
+};
+
 export interface DmnModelerConfig {
   container: string | Element;
   keyboard?: { bindTo?: Window | Document | Element };
@@ -41,7 +63,7 @@ export function createFlowableDmnModeler(config: DmnModelerConfig) {
 
     // Flowable-spezifische Module
     decisionTable: {
-      additionalModules: [  ]
+      additionalModules: [ disableSimpleModeModule ]
     },
     literalExpression: {
       additionalModules: [  ]
