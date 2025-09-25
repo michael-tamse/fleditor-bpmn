@@ -353,6 +353,12 @@ export function customizeProviders(currentModeler?: any) {
           if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/.test(title) && /event/.test(title))) {
             delete entries[k];
           }
+          if ((/message/.test(k) && /intermediate/.test(k) && /throw/.test(k)) || (/message/.test(title) && /throw/.test(title) && /event/.test(title))) {
+            delete entries[k];
+          }
+          if ((/message/.test(k) && /end/.test(k)) || (/message/.test(title) && /end/.test(title) && /event/.test(title))) {
+            delete entries[k];
+          }
         });
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
@@ -405,6 +411,8 @@ export function customizeProviders(currentModeler?: any) {
         });
         delete entries['append.intermediate-link-catch-event'];
         delete entries['append.intermediate-link-throw-event'];
+        delete entries['append.message-intermediate-event'];
+        delete entries['append.message-end-event'];
 
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
@@ -461,6 +469,18 @@ export function customizeProviders(currentModeler?: any) {
           if (/complex[- ]?gateway/i.test(id) || (/complex/i.test(label) && /gateway/i.test(label)) || /bpmn:ComplexGateway$/.test(targetType)) {
             return false;
           }
+          if ((/message/.test(id) && /intermediate/.test(id) && /throw/.test(id)) || (/message/.test(label) && /throw/.test(label) && /event/.test(label))) {
+            return false;
+          }
+          if (targetType === 'bpmn:IntermediateThrowEvent' && entry && entry.target && entry.target.eventDefinitionType === 'bpmn:MessageEventDefinition') {
+            return false;
+          }
+          if ((/message/.test(id) && /end/.test(id)) || (/message/.test(label) && /end/.test(label) && /event/.test(label))) {
+            return false;
+          }
+          if (targetType === 'bpmn:EndEvent' && entry && entry.target && entry.target.eventDefinitionType === 'bpmn:MessageEventDefinition') {
+            return false;
+          }
           if (/toggle-loop/i.test(id) || (/\bloop\b/i.test(label) && !/multi/i.test(label))) {
             return false;
           }
@@ -483,6 +503,30 @@ export function customizeProviders(currentModeler?: any) {
           });
         };
       }
+    }
+
+    const appendMenuProvider = injector.get('appendMenuProvider', false);
+    if (appendMenuProvider && typeof appendMenuProvider.getPopupMenuEntries === 'function') {
+      const originalAppend = appendMenuProvider.getPopupMenuEntries.bind(appendMenuProvider);
+      appendMenuProvider.getPopupMenuEntries = function(element: any) {
+        const entries = originalAppend(element) || {};
+        Object.keys(entries).forEach((id) => {
+          if (/message-(intermediate-throw|end)/.test(id)) delete entries[id];
+        });
+        return entries;
+      };
+    }
+
+    const createMenuProvider = injector.get('createMenuProvider', false);
+    if (createMenuProvider && typeof createMenuProvider.getPopupMenuEntries === 'function') {
+      const originalCreate = createMenuProvider.getPopupMenuEntries.bind(createMenuProvider);
+      createMenuProvider.getPopupMenuEntries = function(element?: any) {
+        const entries = originalCreate(element) || {};
+        Object.keys(entries).forEach((id) => {
+          if (/create-message-(intermediate-throw|end)/.test(id)) delete entries[id];
+        });
+        return entries;
+      };
     }
 
     const popupMenu = injector.get('popupMenu', false);
