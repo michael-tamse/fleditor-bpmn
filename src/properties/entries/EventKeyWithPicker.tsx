@@ -1,6 +1,6 @@
 import { h } from '@bpmn-io/properties-panel/preact';
 import { useService } from 'bpmn-js-properties-panel';
-import { useRef } from '@bpmn-io/properties-panel/preact/hooks';
+import { useMemo, useRef } from '@bpmn-io/properties-panel/preact/hooks';
 
 import type { BPMNElement } from '../types';
 import {
@@ -10,7 +10,9 @@ import {
   type PayloadItem
 } from '../merge';
 import { executeMulti } from '../multiCommand';
-import { EventTypeEntry } from './event-registry';
+import { getEventCorrelationParameter, getEventTypeElement } from '../helpers/flowable-events';
+import { ensureExtensionElements } from '../helpers/ext';
+import { isStartEvent } from '../guards';
 
 import '../styles/properties-panel-ext.css';
 
@@ -43,11 +45,59 @@ export function EventKeyWithPicker(props: EventKeyWithPickerProps) {
   const commandStack = useService('commandStack');
   const bpmnFactory = useService('bpmnFactory');
   const translate = useService('translate');
+  const modeling = useService('modeling');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bo = element.businessObject as ModdleElementLike;
+  const labelId = useMemo(() => `bio-properties-panel-flowable-eventType-${element.id}`, [ element.id ]);
 
   const label = translate ? translate('Event key (type)') : 'Event key (type)';
   const buttonLabel = translate ? translate('Load…') : 'Laden…';
+
+  const getValue = () => {
+    const definition = getEventTypeElement(bo);
+    if (!definition) return '';
+    const value = definition.get ? definition.get('value') ?? definition.get('text') : definition.value ?? definition.text;
+    return value || '';
+  };
+
+  const setValue = (value: string) => {
+    const next = (value || '').trim();
+    let definition = getEventTypeElement(bo);
+
+    if (!next) {
+      if (definition) {
+        const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+        const values = (ext.get ? ext.get('values') : ext.values) || [];
+        const filtered = values.filter((current: any) => current !== definition);
+        modeling.updateModdleProperties(element, ext, { values: filtered });
+      }
+      return;
+    }
+
+    if (!definition) {
+      const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+      const values = (ext.get ? ext.get('values') : ext.values) || [];
+      definition = bpmnFactory.create('flowable:EventType', { value: next });
+      modeling.updateModdleProperties(element, ext, { values: values.concat([ definition ]) });
+    } else {
+      modeling.updateModdleProperties(element, definition, { value: next });
+    }
+
+    try {
+      if (isStartEvent(element)) {
+        const ext = ensureExtensionElements(element, bo, bpmnFactory, modeling);
+        const values = (ext.get ? ext.get('values') : ext.values) || [];
+        const correlation = getEventCorrelationParameter(bo);
+        if (!correlation) {
+          const created = bpmnFactory.create('flowable:EventCorrelationParameter', {
+            name: 'businessKey',
+            value: '${execution.getProcessInstanceBusinessKey()}'
+          });
+          modeling.updateModdleProperties(element, ext, { values: values.concat([ created ]) });
+        }
+      }
+    } catch {}
+  };
 
   const triggerLocalPicker = () => {
     const input = fileInputRef.current;
@@ -127,12 +177,40 @@ export function EventKeyWithPicker(props: EventKeyWithPickerProps) {
     return true;
   }
 
+  const onInput = (event: Event) => {
+    const target = event.target as HTMLInputElement | null;
+    if (!target) return;
+    setValue(target.value);
+  };
+
+  const inputValue = getValue();
+
   return (
-    <div className="flowable-event-key-entry">
-      {EventTypeEntry({ element, label })}
-      <button type="button" className="bio-pp-btn" onClick={onPick}>
-        {buttonLabel}
-      </button>
+    <div className="bio-properties-panel-entry flowable-event-key-entry">
+      <label className="bio-properties-panel-label" htmlFor={labelId}>
+        {label}
+      </label>
+      <div className="bio-properties-panel-textfield">
+        <input
+          id={labelId}
+          name="flowable-eventType"
+          type="text"
+          spellCheck="false"
+          autoComplete="off"
+          className="bio-properties-panel-input"
+          value={inputValue}
+          onInput={onInput}
+        />
+      </div>
+      <div className="flowable-event-key-actions">
+        <button
+          type="button"
+          className="bio-properties-panel-button flowable-event-key-button"
+          onClick={onPick}
+        >
+          {buttonLabel}
+        </button>
+      </div>
       <input
         ref={fileInputRef}
         type="file"
