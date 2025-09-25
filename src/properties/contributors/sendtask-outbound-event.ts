@@ -3,7 +3,8 @@ import { isCheckboxEntryEdited, isTextFieldEntryEdited } from '@bpmn-io/properti
 import { Contributor } from '../types';
 import { isSendTask } from '../guards';
 import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
-import { EventTypeEntry, SendSynchronouslyEntry, createOutboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import { SendSynchronouslyEntry, createOutboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
 export const sendTaskOutboundEvent: Contributor = (element, groups) => {
   if (!isSendTask(element) || !Array.isArray(groups)) return;
@@ -15,7 +16,7 @@ export const sendTaskOutboundEvent: Contributor = (element, groups) => {
   if (!hasEventType) {
     insertAfterIdOrName(general.entries, {
       id: 'flowable-eventType',
-      component: EventTypeEntry,
+      component: EventKeyWithPicker,
       isEdited: isTextFieldEntryEdited
     });
   }

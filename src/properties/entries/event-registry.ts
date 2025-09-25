@@ -14,8 +14,8 @@ import {
 import { ensureExtensionElements } from '../helpers/ext';
 import { isStartEvent } from '../guards';
 
-export function EventTypeEntry(props: { element: BPMNElement }) {
-  const { element } = props;
+export function EventTypeEntry(props: { element: BPMNElement; label?: string }) {
+  const { element, label: overrideLabel } = props;
   const modeling = useService('modeling');
   const bpmnFactory = useService('bpmnFactory');
   const translate = useService('translate');
@@ -69,10 +69,12 @@ export function EventTypeEntry(props: { element: BPMNElement }) {
     } catch {}
   };
 
+  const label = overrideLabel || (translate ? translate('Event key (type)') : 'Event key (type)');
+
   return TextFieldEntry({
     id: 'flowable-eventType',
     element,
-    label: translate ? translate('Event key (type)') : 'Event key (type)',
+    label,
     getValue,
     setValue,
     debounce

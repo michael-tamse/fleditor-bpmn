@@ -95,7 +95,8 @@ const flowableModdle: Record<string, any> = {
       superClass: [ 'Element' ],
       properties: [
         { name: 'source', isAttr: true, type: 'String' },
-        { name: 'target', isAttr: true, type: 'String' }
+        { name: 'target', isAttr: true, type: 'String' },
+        { name: 'type', isAttr: true, type: 'String' }
       ]
     },
     {

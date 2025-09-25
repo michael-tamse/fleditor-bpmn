@@ -1,0 +1,10 @@
+.flowable-event-key-entry {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.flowable-event-key-entry .bio-pp-btn {
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+}
