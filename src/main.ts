@@ -75,7 +75,6 @@ import {
   handleShapeAdded,
   bindDragAndDrop,
   customizeProviders,
-  sanitizeModel,
   initialXml,
   initialDmnXml,
   setModeler as setModelerSetupModeler

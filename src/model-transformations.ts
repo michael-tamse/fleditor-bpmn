@@ -1,9 +1,47 @@
+import { applyImportModelTransformations } from './bpmn-xml-utils';
 import { DiagramTabState } from './types';
 
 let modeler: any = null;
 
 export function setModeler(m: any) {
   modeler = m;
+}
+
+const importTransformationsHandlers = new WeakMap<any, () => void>();
+
+export function installImportModelTransformations(currentModeler?: any) {
+  try {
+    const m = currentModeler || modeler;
+    if (!m) return;
+
+    const eventBus = m.get && m.get('eventBus');
+    if (!eventBus) return;
+
+    if (importTransformationsHandlers.has(m)) return;
+
+    const handler = () => {
+      try {
+        applyImportModelTransformations(m);
+      } catch (err) {
+        console.warn('applyImportModelTransformations failed:', err);
+      }
+    };
+
+    importTransformationsHandlers.set(m, handler);
+    eventBus.on('import.done', handler);
+
+    if (typeof eventBus.on === 'function' && typeof eventBus.off === 'function') {
+      const teardown = () => {
+        try { eventBus.off('import.done', handler); } catch {}
+        importTransformationsHandlers.delete(m);
+      };
+      eventBus.on('diagram.destroy', teardown);
+    }
+
+    handler();
+  } catch (e) {
+    console.warn('installImportModelTransformations failed:', e);
+  }
 }
 
 export function ensureDefaultOutboundMappingForSendTasks(currentModeler?: any) {

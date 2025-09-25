@@ -5,6 +5,8 @@ import {
   deriveDmnId,
   applyImportTransformations
 } from './bpmn-xml-utils';
+import { installImportModelTransformations } from './model-transformations';
+export { sanitizeModel } from './bpmn-xml-utils';
 
 import { DiagramTabState, DiagramInit } from './types';
 
@@ -264,6 +266,7 @@ export function setupModelerForState(state: DiagramTabState) {
         }
       } catch {}
       customizeProviders(state.modeler);
+      installImportModelTransformations(state.modeler);
     });
   }
   bindModelerEvents(state);
@@ -486,10 +489,6 @@ export function customizeProviders(currentModeler?: any) {
   } catch (e) {
     console.warn('Palette/ContextPad customization failed:', e);
   }
-}
-
-export function sanitizeModel() {
-  // Placeholder - actual implementation would be here
 }
 
 export const initialXml = `<?xml version="1.0" encoding="UTF-8"?>
