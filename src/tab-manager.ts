@@ -5,7 +5,7 @@ import flowableModdle from './flowable-moddle';
 import { createFlowableDmnModeler } from './dmn/dmn-factory';
 import { createEventEditor, type EventModel } from './event-editor/event-editor';
 import { Tabs } from './bpmn-tabs/tabs';
-import { updateEmptyStateVisibility, showConfirmDialog, updateZoomButtonsVisibility } from './ui-controls';
+import { updateEmptyStateVisibility, showConfirmDialog, updateToolbarExtras } from './ui-controls';
 
 import { DiagramTabState, DiagramInit } from './types';
 
@@ -47,36 +47,44 @@ export function setTabSequence(seq: number) {
 }
 
 function updateToolbarButtons(state: DiagramTabState | null) {
-  const saveXmlBtn = document.querySelector('#btn-save-xml') as HTMLButtonElement;
-  const saveSvgBtn = document.querySelector('#btn-save-svg') as HTMLButtonElement;
+  const saveXmlBtn = document.querySelector('#btn-save-xml') as HTMLButtonElement | null;
+  const saveSvgBtn = document.querySelector('#btn-save-svg') as HTMLButtonElement | null;
 
-  if (!saveXmlBtn || !saveSvgBtn) return;
+  if (!saveXmlBtn) return;
 
   if (!state) {
     // No active tab - disable both buttons
     saveXmlBtn.disabled = true;
-    saveSvgBtn.disabled = true;
     saveXmlBtn.title = 'Kein Diagramm geöffnet';
-    saveSvgBtn.title = 'Kein Diagramm geöffnet';
+    if (saveSvgBtn) {
+      saveSvgBtn.disabled = true;
+      saveSvgBtn.title = 'Kein Diagramm geöffnet';
+    }
   } else {
     // Active tab - handle different tab kinds
     if (state.kind === 'event') {
       saveXmlBtn.disabled = false;
       saveXmlBtn.title = 'Event-Definition speichern';
       saveXmlBtn.textContent = 'Speichern';
-      saveSvgBtn.disabled = true;
-      saveSvgBtn.title = 'Export nicht verfügbar für Event-Definitionen';
+      if (saveSvgBtn) {
+        saveSvgBtn.disabled = true;
+        saveSvgBtn.title = 'Export nicht verfügbar für Event-Definitionen';
+      }
     } else {
       saveXmlBtn.disabled = false;
       saveXmlBtn.textContent = 'Speichern';
       saveXmlBtn.title = state.kind === 'dmn' ? 'Als DMN speichern' : 'Als BPMN speichern';
 
       if (state.kind === 'bpmn') {
-        saveSvgBtn.disabled = false;
-        saveSvgBtn.title = 'Als SVG speichern';
+        if (saveSvgBtn) {
+          saveSvgBtn.disabled = false;
+          saveSvgBtn.title = 'Als SVG speichern';
+        }
       } else {
-        saveSvgBtn.disabled = true;
-        saveSvgBtn.title = 'SVG-Export nur für BPMN-Diagramme verfügbar';
+        if (saveSvgBtn) {
+          saveSvgBtn.disabled = true;
+          saveSvgBtn.title = 'SVG-Export nur für BPMN-Diagramme verfügbar';
+        }
       }
     }
   }
@@ -105,8 +113,8 @@ export function setActiveTab(id: string | null) {
   if (!id) {
     activeTabState = null;
     modeler = null;
+    updateToolbarExtras();
     updateToolbarButtons(null);
-    updateZoomButtonsVisibility();
     persistActiveTab(null);
     return;
   }
@@ -118,9 +126,9 @@ export function setActiveTab(id: string | null) {
   const applyPropertyPanelVisibility = (window as any).applyPropertyPanelVisibility;
   if (applyPropertyPanelVisibility) applyPropertyPanelVisibility(state);
 
+  updateToolbarExtras();
   // Update toolbar buttons based on active tab type
   updateToolbarButtons(state);
-  updateZoomButtonsVisibility();
 
   try {
     state.modeler.get('canvas').resized();
@@ -370,7 +378,8 @@ export function initTabs() {
         title: '',
         dirty: false,
         isImporting: false,
-        kind
+        kind,
+        toolbarSlot: kind === 'bpmn' ? 'bpmn-controls' : null
       };
 
       // Set state first so it's available during modeler creation

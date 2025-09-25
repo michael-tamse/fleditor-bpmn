@@ -13,7 +13,10 @@ export interface DiagramTabState {
   dirtyTimer?: any;
   isImporting: boolean;
   lastImportTime?: number;
+  toolbarSlot?: ToolbarSlot | null;
 }
+
+export type ToolbarSlot = 'bpmn-controls';
 
 export interface DiagramInit {
   title: string;

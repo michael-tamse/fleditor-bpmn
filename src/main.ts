@@ -39,7 +39,7 @@ import {
   setPropertyPanelVisible,
   getMenubarVisible,
   getPropertyPanelVisible,
-  updateZoomButtonsVisibility,
+  updateToolbarExtras,
   setModeler as setUIModeler,
   setTabStates as setUITabStates
 } from './ui-controls';
@@ -305,7 +305,7 @@ function initializeModules() {
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   updateEmptyStateVisibility();
-  updateZoomButtonsVisibility();
+  updateToolbarExtras();
 
   // Initialize modules after tabs are ready
   setTimeout(() => {
@@ -315,22 +315,44 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toolbar Events - register after modules are initialized
     document.querySelector('#btn-open')?.addEventListener('click', openViaSidecarOrFile);
     document.querySelector('#btn-save-xml')?.addEventListener('click', saveXMLWithSidecarFallback);
-    document.querySelector('#btn-save-svg')?.addEventListener('click', saveSVGWithSidecarFallback);
 
     // Initialize toolbar button states
     const saveXmlBtn = document.querySelector('#btn-save-xml') as HTMLButtonElement;
-    const saveSvgBtn = document.querySelector('#btn-save-svg') as HTMLButtonElement;
-    if (saveXmlBtn && saveSvgBtn) {
+    if (saveXmlBtn) {
       saveXmlBtn.disabled = true;
-      saveSvgBtn.disabled = true;
       saveXmlBtn.title = 'Kein Diagramm geöffnet';
-      saveSvgBtn.title = 'Kein Diagramm geöffnet';
     }
-    document.querySelector('#btn-zoom-in')?.addEventListener('click', () => zoom(+0.2));
-    document.querySelector('#btn-zoom-out')?.addEventListener('click', () => zoom(-0.2));
-    document.querySelector('#btn-zoom-reset')?.addEventListener('click', zoomReset);
-    document.querySelector('#btn-fit')?.addEventListener('click', fitViewport);
   }, 100);
+
+  // Toolbar actions that are contributed per editor kind
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    if (target.closest('#btn-save-svg')) {
+      saveSVGWithSidecarFallback();
+      return;
+    }
+
+    if (target.closest('#btn-zoom-in')) {
+      zoom(+0.2);
+      return;
+    }
+
+    if (target.closest('#btn-zoom-out')) {
+      zoom(-0.2);
+      return;
+    }
+
+    if (target.closest('#btn-zoom-reset')) {
+      zoomReset();
+      return;
+    }
+
+    if (target.closest('#btn-fit')) {
+      fitViewport();
+    }
+  });
 
   // Start-Tiles Event-Handler
   document.addEventListener('click', (e) => {
