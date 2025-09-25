@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Flowable BPMN Editor",
-  "version": "0.0.0",
-  "identifier": "com.example.fleditorbpmn",
+  "version": "1.0.0",
+  "identifier": "de.tamse.project.fleditorbpmn",
   "build": {
     "beforeDevCommand": "vite --strictPort --port 5173",
     "beforeBuildCommand": "vite build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "BPMN Editor (Tauri Host)",
+        "title": "Flowable BPMN Editor (FlEditor)",
         "width": 1200,
         "height": 800,
         "resizable": true,
@@ -32,6 +32,20 @@
         "description": "Flowable process diagram",
         "ext": ["bpmn", "bpmn20.xml", "process.bpmn20.xml"],
         "mimeType": "application/vnd.flowable.bpmn20+xml",
+        "role": "Editor"
+      },
+      {
+        "name": "Flowable DMN",
+        "description": "Flowable decision table",
+        "ext": ["dmn", "dmn.xml"],
+        "mimeType": "application/xml",
+        "role": "Editor"
+      },
+      {
+        "name": "Flowable Event Registry",
+        "description": "Flowable event model",
+        "ext": ["event"],
+        "mimeType": "application/json",
         "role": "Editor"
       }
     ]
