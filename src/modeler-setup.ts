@@ -135,6 +135,53 @@ export function handleShapeAdded(state: DiagramTabState, e: any) {
           }
         }
       }
+      if (bo.$type === 'bpmn:EndEvent') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          const rawDefs = bo.get ? bo.get('eventDefinitions') : (bo as any).eventDefinitions;
+          const defs = Array.isArray(rawDefs) ? rawDefs : [];
+          const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
+          if (hasError) {
+            let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+            if (!ext) {
+              ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+              modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+            }
+            const values = (ext.get ? ext.get('values') : ext.values) || [];
+            const outMappings = values.filter((value: any) => {
+              const type = String(((value && value.$type) || '')).toLowerCase();
+              return type === 'flowable:out';
+            });
+            let didUpdate = false;
+            if (!outMappings.length) {
+              const mapping = bpmnFactory.create('flowable:Out', {
+                source: 'errorMessage',
+                target: 'errorMessage'
+              });
+              modeling.updateModdleProperties(el, ext, { values: values.concat([ mapping ]) });
+              didUpdate = true;
+            } else if (outMappings.length === 1) {
+              const mapping = outMappings[0];
+              const source = mapping.get ? mapping.get('source') : mapping.source;
+              const sourceExpression = mapping.get ? mapping.get('sourceExpression') : mapping.sourceExpression;
+              const target = mapping.get ? mapping.get('target') : mapping.target;
+              if (!source && !sourceExpression && !target) {
+                modeling.updateModdleProperties(el, mapping, {
+                  source: 'errorMessage',
+                  sourceExpression: undefined,
+                  target: 'errorMessage'
+                });
+                didUpdate = true;
+              }
+            }
+            if (didUpdate) {
+              try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+            }
+          }
+        }
+      }
       if (bo.$type === 'bpmn:CallActivity') {
         const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
         const updates: any = {};
@@ -300,6 +347,24 @@ export function setupModelerForState(state: DiagramTabState) {
       installImportModelTransformations(state.modeler);
     });
   }
+
+  const listenerKey = '__flowableShapeListener';
+  const hasListener = Object.prototype.hasOwnProperty.call(state, listenerKey);
+  if (!hasListener) {
+    try {
+      const eventBus = state.modeler.get && state.modeler.get('eventBus', false);
+      if (eventBus && typeof eventBus.on === 'function') {
+        const handler = (event: any) => {
+          try { handleShapeAdded(state, event); } catch {}
+        };
+        ['commandStack.shape.create.postExecute', 'commandStack.shape.append.postExecute'].forEach((type) => {
+          try { eventBus.on(type, handler); } catch {}
+        });
+        (state as any)[listenerKey] = handler;
+      }
+    } catch {}
+  }
+
   bindModelerEvents(state);
   bindDragAndDrop(state);
   applyPropertyPanelVisibility(state);

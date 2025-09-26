@@ -7,6 +7,13 @@ import { ensureExtensionElements, getDefinitions } from '../helpers/ext';
 import { addFlowableMapping, getFlowableMappings, getMappingType, removeFlowableMapping } from '../helpers/flowable-mappings';
 import { getErrorEventDefinition } from '../helpers/errors';
 
+function isErrorEndEvent(element: BPMNElement): boolean {
+  const bo = element && element.businessObject;
+  if (!bo || (bo.$type !== 'bpmn:EndEvent')) return false;
+  const defs = bo.get ? bo.get('eventDefinitions') : (bo as any).eventDefinitions;
+  return Array.isArray(defs) && defs.some((def: any) => def && def.$type === 'bpmn:ErrorEventDefinition');
+}
+
 export function ErrorVariableNameEntry(props: { element: BPMNElement }) {
   const modeling = useService('modeling');
   const translate = useService('translate');
@@ -290,7 +297,22 @@ function ErrorOutMappingGroupComponent(props: any) {
   });
   const add = (event?: any) => {
     try { event && event.stopPropagation && event.stopPropagation(); } catch {}
-    addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+    const existing = getFlowableMappings(element.businessObject, 'Out');
+    const created = addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+    if (
+      created &&
+      Array.isArray(existing) &&
+      existing.length === 0 &&
+      isErrorEndEvent(element)
+    ) {
+      try {
+        modeling.updateModdleProperties(element, created, {
+          source: 'errorMessage',
+          sourceExpression: undefined,
+          target: 'errorMessage'
+        });
+      } catch {}
+    }
   };
   return h(ListGroup as any, {
     id,
