@@ -15,6 +15,13 @@ import {
 export const errorStartEvent: Contributor = (element, groups) => {
   if (!isStartEvent(element) || !isErrorStartEvent(element) || !Array.isArray(groups)) return;
 
+  for (let idx = groups.length - 1; idx >= 0; idx -= 1) {
+    const group = groups[idx];
+    if (group && group.id === 'error') {
+      groups.splice(idx, 1);
+    }
+  }
+
   const general = findGroup(groups, 'general');
   if (!general || !Array.isArray(general.entries)) return;
 

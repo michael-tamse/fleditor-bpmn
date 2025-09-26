@@ -14,6 +14,7 @@ import {
   messageBoundaryEvent,
   errorStartEvent,
   errorBoundaryEvent,
+  errorEndEvent,
   businessRuleTask,
   multiInstance,
   variableAggregations
@@ -36,6 +37,7 @@ const contribute = compose(
   messageBoundaryEvent,
   errorStartEvent,
   errorBoundaryEvent,
+  errorEndEvent,
   businessRuleTask,
   multiInstance,
   variableAggregations
