@@ -311,6 +311,64 @@ export function customizeProviders(currentModeler?: any) {
     if (!m) return;
 
     const injector = m.get('injector');
+    const disallowedEventKeywords = ['conditional', 'signal', 'escalation', 'cancel'];
+    const matchesDisallowedEventKeyword = (value: string) => {
+      const lowered = (value || '').toLowerCase();
+      return disallowedEventKeywords.some((keyword) => lowered.includes(keyword));
+    };
+    const isDisallowedEventEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const eventDefinitionType = String((target && target.eventDefinitionType) || '');
+      if (eventDefinitionType && /bpmn:(Conditional|Signal|Escalation|Cancel)EventDefinition$/.test(eventDefinitionType)) {
+        return true;
+      }
+      const targetType = String((target && target.type) || '');
+      const hasEventContext = /event/.test(loweredKey) || /event/.test(label) || /Event$/.test(targetType);
+      if (!hasEventContext) {
+        return false;
+      }
+      return matchesDisallowedEventKeyword(loweredKey) || matchesDisallowedEventKeyword(label);
+    };
+    const isTransactionEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const targetType = String((target && target.type) || '');
+      if (/bpmn:Transaction$/i.test(targetType)) {
+        return true;
+      }
+      const type = String((entry && entry.type) || '');
+      if (/bpmn:Transaction$/i.test(type)) {
+        return true;
+      }
+      return /transaction/.test(loweredKey) || /transaction/.test(label);
+    };
+    const isCompensationEndEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const targetType = String((target && target.type) || '');
+      const eventDefinitionType = String((target && target.eventDefinitionType) || '');
+      if (targetType === 'bpmn:EndEvent' && /bpmn:CompensateEventDefinition$/i.test(eventDefinitionType)) {
+        return true;
+      }
+      if (/compensation/.test(loweredKey) && /end/.test(loweredKey)) {
+        return true;
+      }
+      if (/compensation/.test(label) && /end/.test(label)) {
+        return true;
+      }
+      const action = entry && (entry.action || {});
+      const actionOptions = (action as any).options || {};
+      const actionEventDefinitionType = String(actionOptions.eventDefinitionType || '');
+      const actionType = String(action.type || '');
+      if (actionType === 'bpmn:EndEvent' && /bpmn:CompensateEventDefinition$/i.test(actionEventDefinitionType)) {
+        return true;
+      }
+      return false;
+    };
 
     const paletteProvider = injector.get('paletteProvider', false);
     const palette = m.get('palette', false);
@@ -372,6 +430,15 @@ export function customizeProviders(currentModeler?: any) {
             delete entries[k];
           }
         });
+        Object.keys(entries).forEach((k) => {
+          if (
+            isDisallowedEventEntry(k, entries[k]) ||
+            isTransactionEntry(k, entries[k]) ||
+            isCompensationEndEntry(k, entries[k])
+          ) {
+            delete entries[k];
+          }
+        });
         return entries;
       };
       try { console.debug && console.debug('[Palette] provider patched'); } catch {}
@@ -420,6 +487,16 @@ export function customizeProviders(currentModeler?: any) {
           if ((/complex/i.test(k) && /gateway/i.test(k)) || (/complex/.test(title) && /gateway/.test(title))) delete entries[k];
         });
         delete entries['append.complex-gateway'];
+
+        Object.keys(entries).forEach((k) => {
+          if (
+            isDisallowedEventEntry(k, entries[k]) ||
+            isTransactionEntry(k, entries[k]) ||
+            isCompensationEndEntry(k, entries[k])
+          ) {
+            delete entries[k];
+          }
+        });
 
         return entries;
       };
@@ -481,6 +558,17 @@ export function customizeProviders(currentModeler?: any) {
           if (targetType === 'bpmn:EndEvent' && entry && entry.target && entry.target.eventDefinitionType === 'bpmn:MessageEventDefinition') {
             return false;
           }
+          if (
+            isDisallowedEventEntry(id, entry) ||
+            isDisallowedEventEntry(targetType, entry) ||
+            matchesDisallowedEventKeyword(label) ||
+            isTransactionEntry(id, entry) ||
+            isTransactionEntry(targetType, entry) ||
+            isCompensationEndEntry(id, entry) ||
+            isCompensationEndEntry(targetType, entry)
+          ) {
+            return false;
+          }
           if (/toggle-loop/i.test(id) || (/\bloop\b/i.test(label) && !/multi/i.test(label))) {
             return false;
           }
@@ -513,6 +601,15 @@ export function customizeProviders(currentModeler?: any) {
         Object.keys(entries).forEach((id) => {
           if (/message-(intermediate-throw|end)/.test(id)) delete entries[id];
         });
+        Object.keys(entries).forEach((id) => {
+          if (
+            isDisallowedEventEntry(id, entries[id]) ||
+            isTransactionEntry(id, entries[id]) ||
+            isCompensationEndEntry(id, entries[id])
+          ) {
+            delete entries[id];
+          }
+        });
         return entries;
       };
     }
@@ -524,6 +621,15 @@ export function customizeProviders(currentModeler?: any) {
         const entries = originalCreate(element) || {};
         Object.keys(entries).forEach((id) => {
           if (/create-message-(intermediate-throw|end)/.test(id)) delete entries[id];
+        });
+        Object.keys(entries).forEach((id) => {
+          if (
+            isDisallowedEventEntry(id, entries[id]) ||
+            isTransactionEntry(id, entries[id]) ||
+            isCompensationEndEntry(id, entries[id])
+          ) {
+            delete entries[id];
+          }
         });
         return entries;
       };
@@ -546,7 +652,10 @@ export function customizeProviders(currentModeler?: any) {
                 /data\s+store\s+reference/.test(label) ||
                 (/pool/.test(label) && (/(expanded|empty)/.test(label))) ||
                 (/sub\s*-?process/.test(label) && /collapsed/.test(label)) ||
-                (/script/.test(label) && /task/.test(label))
+                (/script/.test(label) && /task/.test(label)) ||
+                isDisallowedEventEntry(id, e) ||
+                isTransactionEntry(id, e) ||
+                isCompensationEndEntry(id, e)
               );
             };
             Object.keys(entries).forEach((id) => {
