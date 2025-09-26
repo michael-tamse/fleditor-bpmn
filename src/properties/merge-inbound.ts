@@ -1,72 +1,34 @@
-/**
- * Flowable outbound event merge helpers.
- *
- * Adjust the constants below when Flowable moddle names change.
- */
 import type BpmnFactory from 'bpmn-js/lib/features/modeling/BpmnFactory';
 
-export const FLOWABLE = {
-  EVENT_TYPE_ELEMENT: 'flowable:EventType',
-  EVENT_TYPE_VALUE_PROP: 'value',
-  EVENT_IN_PARAMETER: 'flowable:EventInParameter',
-  EVENT_OUT_PARAMETER: 'flowable:EventOutParameter',
-  EVENT_CORRELATION: 'flowable:EventCorrelationParameter',
-  MAPPING_PROPS: {
-    target: 'target',
-    source: 'source',
-    type: 'type'
-  }
-} as const;
-
-export interface PayloadItem {
-  name: string;
-  type?: string;
-}
-
-export interface MergeOptions {
-  pruneStale?: boolean;
-  defaultSourceExpr?: (name: string) => string;
-  updateTypeIfDifferent?: boolean;
-  setSourceIfEmpty?: boolean;
-}
-
-export interface CommandDescriptor {
-  cmd: string;
-  context: Record<string, unknown>;
-}
-
-export interface ModdleElementLike {
-  $type: string;
-  get?<T = unknown>(prop: string): T;
-  set?<T = unknown>(prop: string, value: T): void;
-  [key: string]: unknown;
-}
-
-export interface CorrelationItem {
-  name: string;
-  type?: string;
-}
+import {
+  FLOWABLE,
+  type CommandDescriptor,
+  type CorrelationItem,
+  type MergeOptions,
+  type ModdleElementLike,
+  type PayloadItem
+} from './merge';
 
 interface MergeBuildOptions {
   element: ModdleElementLike;
   bo: ModdleElementLike;
   eventKey: string;
   payload: PayloadItem[];
-  bpmnFactory: BpmnFactory;
   correlations?: CorrelationItem[];
+  bpmnFactory: BpmnFactory;
   options?: MergeOptions;
 }
 
 const DEFAULTS: Required<Omit<MergeOptions, 'pruneStale'>> & { pruneStale: boolean } = {
   pruneStale: false,
-  defaultSourceExpr: (name: string) => '${' + name + '}',
+  defaultSourceExpr: (name: string) => name,
   updateTypeIfDifferent: true,
   setSourceIfEmpty: true
 };
 
-const CORRELATION_SOURCE_DEFAULT = '${execution.getProcessInstanceBusinessKey()}';
+const CORRELATION_DEFAULT_VALUE = '${execution.getProcessInstanceBusinessKey()}';
 
-export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDescriptor[] {
+export function buildInboundMergeCommands(opts: MergeBuildOptions): CommandDescriptor[] {
   const { element, bo, payload, eventKey } = opts;
 
   const commands: CommandDescriptor[] = [];
@@ -106,16 +68,11 @@ export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDesc
     }
   }
 
-  const dedupedPayload = dedupePayload(payload);
-  const dedupedCorrelations = dedupeCorrelations(opts.correlations || []);
+  const dedupedPayload = dedupeList(payload);
+  const dedupedCorrelations = dedupeList(opts.correlations || []);
 
-  if (!dedupedPayload.length && !dedupedCorrelations.length) {
-    return commands;
-  }
-
-  const mappings = values.filter((value) => value && value.$type === FLOWABLE.EVENT_IN_PARAMETER) as ModdleElementLike[];
+  const mappings = values.filter((value) => value && value.$type === FLOWABLE.EVENT_OUT_PARAMETER) as ModdleElementLike[];
   const byTarget = new Map<string, ModdleElementLike>();
-
   mappings.forEach((mapping) => {
     const target = (readAttr(mapping, FLOWABLE.MAPPING_PROPS.target) || '').trim();
     if (target && !byTarget.has(target)) {
@@ -126,68 +83,18 @@ export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDesc
   let valuesChanged = false;
   let nextValues = values.slice();
 
-  dedupedCorrelations.forEach((item) => {
-    const target = item.name;
-    const existing = byTarget.get(target);
-
-    if (existing) {
-      const updates: Record<string, unknown> = {};
-      const currentSource = readAttr(existing, FLOWABLE.MAPPING_PROPS.source);
-      const currentType = readAttr(existing, FLOWABLE.MAPPING_PROPS.type);
-
-      if ((currentSource || '').trim() !== CORRELATION_SOURCE_DEFAULT) {
-        updates[FLOWABLE.MAPPING_PROPS.source] = CORRELATION_SOURCE_DEFAULT;
-      }
-
-      if (options.updateTypeIfDifferent) {
-        const trimmedType = (currentType || '').trim();
-        const nextType = (item.type || '').trim();
-        if (nextType && trimmedType !== nextType) {
-          updates[FLOWABLE.MAPPING_PROPS.type] = nextType;
-        }
-      }
-
-      if (Object.keys(updates).length) {
-        commands.push({
-          cmd: 'element.updateModdleProperties',
-          context: {
-            element,
-            moddleElement: existing,
-            properties: updates
-          }
-        });
-      }
-
-      return;
-    }
-
-    const mapping = opts.bpmnFactory.create(FLOWABLE.EVENT_IN_PARAMETER, {
-      [FLOWABLE.MAPPING_PROPS.target]: target,
-      [FLOWABLE.MAPPING_PROPS.source]: CORRELATION_SOURCE_DEFAULT,
-      [FLOWABLE.MAPPING_PROPS.type]: item.type
-    });
-
-    nextValues = nextValues.concat([ mapping ]);
-    valuesChanged = true;
-    mappings.push(mapping);
-    byTarget.set(target, mapping);
-  });
-
   dedupedPayload.forEach((item) => {
     const target = item.name;
     const existing = byTarget.get(target);
+    const defaultSource = options.defaultSourceExpr(target);
 
     if (existing) {
       const updates: Record<string, unknown> = {};
       const currentSource = readAttr(existing, FLOWABLE.MAPPING_PROPS.source);
       const currentType = readAttr(existing, FLOWABLE.MAPPING_PROPS.type);
-      const defaultSource = options.defaultSourceExpr(target);
 
-      if (options.setSourceIfEmpty) {
-        const trimmedSource = (currentSource || '').trim();
-        if (!trimmedSource) {
-          updates[FLOWABLE.MAPPING_PROPS.source] = defaultSource;
-        }
+      if (options.setSourceIfEmpty && !(currentSource || '').trim() && defaultSource) {
+        updates[FLOWABLE.MAPPING_PROPS.source] = defaultSource;
       }
 
       if (options.updateTypeIfDifferent) {
@@ -212,9 +119,9 @@ export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDesc
       return;
     }
 
-    const mapping = opts.bpmnFactory.create(FLOWABLE.EVENT_IN_PARAMETER, {
+    const mapping = opts.bpmnFactory.create(FLOWABLE.EVENT_OUT_PARAMETER, {
       [FLOWABLE.MAPPING_PROPS.target]: target,
-      [FLOWABLE.MAPPING_PROPS.source]: options.defaultSourceExpr(target),
+      [FLOWABLE.MAPPING_PROPS.source]: defaultSource,
       [FLOWABLE.MAPPING_PROPS.type]: item.type
     });
     nextValues = nextValues.concat([ mapping ]);
@@ -224,11 +131,11 @@ export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDesc
   });
 
   if (options.pruneStale) {
-    const allowed = new Set(dedupedPayload.map((item) => item.name));
+    const allowedTargets = new Set(dedupedPayload.map((item) => item.name));
     const filtered = nextValues.filter((value) => {
-      if (!value || value.$type !== FLOWABLE.EVENT_IN_PARAMETER) return true;
+      if (!value || value.$type !== FLOWABLE.EVENT_OUT_PARAMETER) return true;
       const target = (readAttr(value, FLOWABLE.MAPPING_PROPS.target) || '').trim();
-      return !target || allowed.has(target);
+      return !target || allowedTargets.has(target);
     });
     if (filtered.length !== nextValues.length) {
       nextValues = filtered;
@@ -238,6 +145,49 @@ export function buildOutboundMergeCommands(opts: MergeBuildOptions): CommandDesc
 
   if (valuesChanged) {
     pushExtensionUpdate(commands, element, extensionElements, nextValues);
+    values = nextValues;
+  }
+
+  if (dedupedCorrelations.length) {
+    const first = dedupedCorrelations[0];
+    let correlation = findByType(values, FLOWABLE.EVENT_CORRELATION) as ModdleElementLike | null;
+
+    if (!correlation) {
+      correlation = opts.bpmnFactory.create(FLOWABLE.EVENT_CORRELATION, {
+        name: first.name,
+        value: CORRELATION_DEFAULT_VALUE
+      });
+      values = values.concat([ correlation ]);
+      pushExtensionUpdate(commands, element, extensionElements, values);
+    }
+
+    if (!correlation) {
+      return commands;
+    }
+
+    const currentName = (readAttr(correlation, 'name') || '').trim();
+    if (currentName !== first.name) {
+      commands.push({
+        cmd: 'element.updateModdleProperties',
+        context: {
+          element,
+          moddleElement: correlation,
+          properties: { name: first.name }
+        }
+      });
+    }
+
+    const currentValue = readAttr(correlation, 'value');
+    if (!(currentValue || '').trim()) {
+      commands.push({
+        cmd: 'element.updateModdleProperties',
+        context: {
+          element,
+          moddleElement: correlation,
+          properties: { value: CORRELATION_DEFAULT_VALUE }
+        }
+      });
+    }
   }
 
   return commands;
@@ -262,6 +212,16 @@ function ensureExtensionElements(commands: CommandDescriptor[], opts: MergeBuild
   return extensionElements;
 }
 
+function dedupeList<T extends { name: string; type?: string }>(items: T[]): T[] {
+  const map = new Map<string, T>();
+  items.forEach((item) => {
+    const name = (item?.name || '').trim();
+    if (!name) return;
+    map.set(name, { name, type: item?.type ? item.type : undefined } as T);
+  });
+  return Array.from(map.values());
+}
+
 function pushExtensionUpdate(
   commands: CommandDescriptor[],
   element: ModdleElementLike,
@@ -276,26 +236,6 @@ function pushExtensionUpdate(
       properties: { values }
     }
   });
-}
-
-function dedupePayload(payload: PayloadItem[]): PayloadItem[] {
-  const map = new Map<string, PayloadItem>();
-  payload.forEach((item) => {
-    const name = (item?.name || '').trim();
-    if (!name) return;
-    map.set(name, { name, type: item?.type ? item.type : undefined });
-  });
-  return Array.from(map.values());
-}
-
-function dedupeCorrelations(correlations: CorrelationItem[]): CorrelationItem[] {
-  const map = new Map<string, CorrelationItem>();
-  correlations.forEach((item) => {
-    const name = (item?.name || '').trim();
-    if (!name) return;
-    map.set(name, { name, type: item?.type ? item.type : undefined });
-  });
-  return Array.from(map.values());
 }
 
 function readAttr(element: ModdleElementLike | null | undefined, prop: string): any {

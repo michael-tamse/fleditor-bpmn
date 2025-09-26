@@ -4,11 +4,11 @@ import { Contributor } from '../types';
 import { isReceiveTask } from '../guards';
 import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
 import {
-  EventTypeEntry,
   createCorrelationParametersGroup,
   createInboundEventMappingGroup,
   GeneralSpacerEntry
 } from '../helpers/entries';
+import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
 export const receiveTaskInboundEvent: Contributor = (element, groups) => {
   if (!isReceiveTask(element) || !Array.isArray(groups)) return;
@@ -20,7 +20,7 @@ export const receiveTaskInboundEvent: Contributor = (element, groups) => {
   if (!hasEventType) {
     insertAfterIdOrName(general.entries, {
       id: 'flowable-eventType',
-      component: EventTypeEntry,
+      component: EventKeyWithPicker,
       isEdited: isTextFieldEntryEdited
     });
   }

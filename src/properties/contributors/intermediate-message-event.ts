@@ -3,7 +3,8 @@ import { isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 import { Contributor } from '../types';
 import { isIntermediateCatchEvent, isTimerIntermediateCatchEvent } from '../guards';
 import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
-import { EventTypeEntry, createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import { createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
 export const intermediateMessageEvent: Contributor = (element, groups) => {
   if (!isIntermediateCatchEvent(element) || isTimerIntermediateCatchEvent(element) || !Array.isArray(groups)) return;
@@ -15,7 +16,7 @@ export const intermediateMessageEvent: Contributor = (element, groups) => {
   if (!hasEventType) {
     insertAfterIdOrName(general.entries, {
       id: 'flowable-eventType',
-      component: EventTypeEntry,
+      component: EventKeyWithPicker,
       isEdited: isTextFieldEntryEdited
     });
   }

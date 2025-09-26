@@ -4,15 +4,17 @@ import { useMemo, useRef } from '@bpmn-io/properties-panel/preact/hooks';
 
 import type { BPMNElement } from '../types';
 import {
-  buildMergeCommands,
+  buildOutboundMergeCommands,
   type CorrelationItem,
   type ModdleElementLike,
   type PayloadItem
 } from '../merge';
+import { buildInboundMergeCommands } from '../merge-inbound';
 import { executeMulti } from '../multiCommand';
 import { getEventCorrelationParameter, getEventTypeElement } from '../helpers/flowable-events';
 import { ensureExtensionElements } from '../helpers/ext';
-import { isStartEvent } from '../guards';
+import { isStartEvent, isSendTask } from '../guards';
+import { setCorrelationOptions } from '../state/event-loader-state';
 
 import '../styles/properties-panel-ext.css';
 
@@ -49,6 +51,7 @@ export function EventKeyWithPicker(props: EventKeyWithPickerProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bo = element.businessObject as ModdleElementLike;
   const labelId = useMemo(() => `bio-properties-panel-flowable-eventType-${element.id}`, [ element.id ]);
+  const mode: 'outbound' | 'inbound' = isSendTask(element) ? 'outbound' : 'inbound';
 
   const label = translate ? translate('Event key (type)') : 'Event key (type)';
   const buttonLabel = translate ? translate('Load…') : 'Laden…';
@@ -155,25 +158,46 @@ export function EventKeyWithPicker(props: EventKeyWithPickerProps) {
 
   function applyNormalized(normalized: NormalizedEventData): boolean {
     const { key, payload, correlations } = normalized;
-    const commands = buildMergeCommands({
-      element: element as unknown as ModdleElementLike,
-      bo: bo as ModdleElementLike,
-      eventKey: key,
-      payload,
-      correlations,
-      bpmnFactory,
-      options: {
-        pruneStale: false,
-        updateTypeIfDifferent: true,
-        setSourceIfEmpty: true
-      }
-    });
+
+    const commands = mode === 'outbound'
+      ? buildOutboundMergeCommands({
+          element: element as unknown as ModdleElementLike,
+          bo: bo as ModdleElementLike,
+          eventKey: key,
+          payload,
+          correlations,
+          bpmnFactory,
+          options: {
+            pruneStale: false,
+            updateTypeIfDifferent: true,
+            setSourceIfEmpty: true
+          }
+        })
+      : buildInboundMergeCommands({
+          element: element as unknown as ModdleElementLike,
+          bo: bo as ModdleElementLike,
+          eventKey: key,
+          payload,
+          correlations,
+          bpmnFactory,
+          options: {
+            pruneStale: false,
+            updateTypeIfDifferent: true,
+            setSourceIfEmpty: true
+          }
+        });
 
     if (!commands.length) {
+      setCorrelationOptions(bo, correlations.map((item) => item.name));
+    const nextValue = getValue();
+    if (nextValue !== key) {
+      modeling.updateProperties(element, { ['flowable:eventType']: key });
+    }
       return false;
     }
 
     executeMulti(commandStack, commands);
+    setCorrelationOptions(bo, correlations.map((item) => item.name));
     return true;
   }
 
