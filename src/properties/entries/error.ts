@@ -4,7 +4,7 @@ import { h } from '@bpmn-io/properties-panel/preact';
 
 import type { BPMNElement } from '../types';
 import { ensureExtensionElements, getDefinitions } from '../helpers/ext';
-import { getFlowableMappings, removeFlowableMapping } from '../helpers/flowable-mappings';
+import { addFlowableMapping, getFlowableMappings, getMappingType, removeFlowableMapping } from '../helpers/flowable-mappings';
 import { getErrorEventDefinition } from '../helpers/errors';
 
 export function ErrorVariableNameEntry(props: { element: BPMNElement }) {
@@ -195,5 +195,116 @@ export function createErrorMappingGroup(_element: BPMNElement) {
   return {
     id: 'flowable-error-mapping',
     component: ErrorMappingGroupComponent
+  } as any;
+}
+
+function ErrorOutMappingTypeEntry(props: { element: BPMNElement; mapping: any; id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const getValue = () => getMappingType(mapping);
+  const setValue = (value: 'source' | 'sourceExpression') => {
+    (mapping as any).__flowableType = value;
+    if (value === 'source') {
+      modeling.updateModdleProperties(element, mapping, { sourceExpression: undefined });
+    } else {
+      modeling.updateModdleProperties(element, mapping, { source: undefined });
+    }
+  };
+  const getOptions = () => ([
+    { label: translate ? translate('Variable') : 'Variable', value: 'source' },
+    { label: translate ? translate('Expression') : 'Expression', value: 'sourceExpression' }
+  ]);
+  return SelectEntry({
+    element,
+    id,
+    label: translate ? translate('Source type') : 'Source type',
+    getValue,
+    setValue,
+    getOptions
+  });
+}
+
+function ErrorOutMappingSourceEntry(props: { element: BPMNElement; mapping: any; id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => {
+    const type = getMappingType(mapping);
+    return type === 'source'
+      ? ((mapping.get ? mapping.get('source') : mapping.source) || '')
+      : ((mapping.get ? mapping.get('sourceExpression') : mapping.sourceExpression) || '');
+  };
+  const setValue = (value: string) => {
+    const clean = (value || '').trim() || undefined;
+    const type = getMappingType(mapping);
+    if (type === 'source') {
+      modeling.updateModdleProperties(element, mapping, { source: clean });
+      return;
+    }
+    modeling.updateModdleProperties(element, mapping, { sourceExpression: clean });
+  };
+  const label = translate ? translate('Source (Variable / Expression)') : 'Source (Variable / Expression)';
+  return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
+}
+
+function ErrorOutMappingTargetEntry(props: { element: BPMNElement; mapping: any; id: string }) {
+  const { element, mapping, id } = props;
+  const modeling = useService('modeling');
+  const translate = useService('translate');
+  const debounce = useService('debounceInput');
+  const getValue = () => (mapping.get ? mapping.get('target') : mapping.target) || '';
+  const setValue = (value: string) => modeling.updateModdleProperties(element, mapping, { target: (value || '').trim() || undefined });
+  return TextFieldEntry({
+    id,
+    element,
+    label: translate ? translate('Target') : 'Target',
+    getValue,
+    setValue,
+    debounce
+  });
+}
+
+function ErrorOutMappingGroupComponent(props: any) {
+  const { element, id, label } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+  const mappings = getFlowableMappings(element.businessObject, 'Out');
+  const items = mappings.map((mapping: any, index: number) => {
+    const entryLabel = (mapping.get ? mapping.get('target') : mapping.target) || '';
+    const entries = [
+      { id: `flowable-error-out-${index}-type`, element, mapping, component: ErrorOutMappingTypeEntry, isEdited: isSelectEntryEdited },
+      { id: `flowable-error-out-${index}-source`, element, mapping, component: ErrorOutMappingSourceEntry, isEdited: isTextFieldEntryEdited },
+      { id: `flowable-error-out-${index}-target`, element, mapping, component: ErrorOutMappingTargetEntry, isEdited: isTextFieldEntryEdited }
+    ];
+    const remove = () => removeFlowableMapping(element, mapping, modeling);
+    return {
+      id: `flowable-error-out-item-${index}`,
+      label: entryLabel,
+      entries,
+      remove,
+      autoFocusEntry: `flowable-error-out-${index}-source`
+    };
+  });
+  const add = (event?: any) => {
+    try { event && event.stopPropagation && event.stopPropagation(); } catch {}
+    addFlowableMapping(element, 'Out', bpmnFactory, modeling);
+  };
+  return h(ListGroup as any, {
+    id,
+    label: label || (translate ? translate('Error mapping') : 'Error mapping'),
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
+export function createErrorOutMappingGroup(_element: BPMNElement) {
+  return {
+    id: 'flowable-error-mapping',
+    component: ErrorOutMappingGroupComponent
   } as any;
 }

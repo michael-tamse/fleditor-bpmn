@@ -13,7 +13,8 @@ export {
   ErrorDef_VariableTransientEntry,
   ErrorDef_VariableLocalScopeEntry,
   ErrorCodeEntry,
-  createErrorMappingGroup
+  createErrorMappingGroup,
+  createErrorOutMappingGroup
 } from '../entries/error';
 export {
   EventTypeEntry,
