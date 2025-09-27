@@ -126,6 +126,76 @@ function AggregationDefinitionTargetEntry(props: { element: BPMNElement; aggrega
   return TextFieldEntry({ id, element, label, getValue, setValue, debounce });
 }
 
+function getDefinitionLabel(definition: any) {
+  if (definition && typeof definition.get === 'function') {
+    return definition.get('target')
+      || definition.get('source')
+      || definition.get('variableTarget')
+      || definition.get('variableSource')
+      || '';
+  }
+  const attrs = (definition && definition.$attrs) || {};
+  return attrs.target
+    || attrs.source
+    || definition?.target
+    || definition?.source
+    || definition?.variableTarget
+    || definition?.variableSource
+    || '';
+}
+
+function VariableAggregationDefinitionsList(props: { element: BPMNElement; aggregation: any; id: string }) {
+  const { element, aggregation, id } = props;
+  const translate = useService('translate');
+  const bpmnFactory = useService('bpmnFactory');
+  const modeling = useService('modeling');
+
+  const definitions = getAggregationDefinitions(aggregation);
+  const items = definitions.map((definition: any, index: number) => {
+    const entries = [
+      {
+        id: `${id}-${index}-source`,
+        element,
+        aggregation,
+        definition,
+        component: AggregationDefinitionSourceEntry,
+        isEdited: isTextFieldEntryEdited
+      },
+      {
+        id: `${id}-${index}-target`,
+        element,
+        aggregation,
+        definition,
+        component: AggregationDefinitionTargetEntry,
+        isEdited: isTextFieldEntryEdited
+      }
+    ];
+    const remove = () => removeAggregationDefinition(element, aggregation, definition, modeling);
+    const label = getDefinitionLabel(definition);
+    return {
+      id: `${id}-item-${index}`,
+      label,
+      entries,
+      remove,
+      autoFocusEntry: `${id}-${index}-source`
+    };
+  });
+
+  const add = (event?: any) => {
+    try { event?.stopPropagation?.(); } catch {}
+    addAggregationDefinition(element, aggregation, bpmnFactory, modeling);
+  };
+
+  return h(ListGroup as any, {
+    id,
+    label: translate ? translate('Definitions') : 'Definitions',
+    element,
+    items,
+    add,
+    shouldSort: false
+  });
+}
+
 export function VariableAggregationsGroupComponent(props: any) {
   const { element, id, label } = props;
   const translate = useService('translate');
@@ -159,59 +229,7 @@ export function VariableAggregationsGroupComponent(props: any) {
         id: `flowable-varAgg-${index}-defs`,
         element,
         aggregation,
-        component: (props: any) => {
-          const { element: currentElement, aggregation: currentAggregation, id: defsId } = props;
-          const definitions = getAggregationDefinitions(currentAggregation);
-          const items = definitions.map((definition: any, defIndex: number) => {
-            const entries = [
-              {
-                id: `${defsId}-${defIndex}-source`,
-                element: currentElement,
-                aggregation: currentAggregation,
-                definition,
-                component: AggregationDefinitionSourceEntry,
-                isEdited: isTextFieldEntryEdited
-              },
-              {
-                id: `${defsId}-${defIndex}-target`,
-                element: currentElement,
-                aggregation: currentAggregation,
-                definition,
-                component: AggregationDefinitionTargetEntry,
-                isEdited: isTextFieldEntryEdited
-              }
-            ];
-            const remove = () => removeAggregationDefinition(currentElement, currentAggregation, definition, modeling);
-            const label = (() => {
-              if (definition && typeof definition.get === 'function') {
-                return definition.get('target') || definition.get('source') || definition.get('variableTarget') || definition.get('variableSource') || '';
-              }
-              const attrs = (definition && definition.$attrs) || {};
-              return attrs.target || attrs.source || definition?.target || definition?.source || definition?.variableTarget || definition?.variableSource || '';
-            })();
-            return {
-              id: `${defsId}-item-${defIndex}`,
-              label,
-              entries,
-              remove,
-              autoFocusEntry: `${defsId}-${defIndex}-source`
-            };
-          });
-
-          const add = (event?: any) => {
-            try { event?.stopPropagation?.(); } catch {}
-            addAggregationDefinition(currentElement, currentAggregation, bpmnFactory, modeling);
-          };
-
-          return h(ListGroup as any, {
-            id: defsId,
-            label: translate ? translate('Definitions') : 'Definitions',
-            element: currentElement,
-            items,
-            add,
-            shouldSort: false
-          });
-        }
+        component: VariableAggregationDefinitionsList
       }
     ];
 
