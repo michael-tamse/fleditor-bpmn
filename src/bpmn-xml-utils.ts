@@ -717,6 +717,11 @@ export function toFlowableDefinitionHeader(xml: string): string {
       'xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI"',
       'xmlns:design="http://flowable.org/design"',
       'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"',
+      'typeLanguage="http://www.w3.org/2001/XMLSchema"',
+      'expressionLanguage="http://www.w3.org/1999/XPath"',
+      'exporter="Flowable Design"',
+      'exporterVersion="2025.1.02"',
+      'design:palette="flowable-work-process-palette"',
       `id="${defId}"`,
       'targetNamespace="http://flowable.org/test">'
     ].join(' ');
@@ -724,7 +729,10 @@ export function toFlowableDefinitionHeader(xml: string): string {
     // Replace definitions opening tag
     out = out.replace(/<((?:[a-zA-Z_][\w-]*:)?)definitions\b[^>]*>/i, openTag);
 
-    // Normalize bpmndi prefixes to just "bpmndi:" throughout
+    // Ensure closing tag mirrors opening tag without prefix
+    out = out.replace(/<\/(?:[a-zA-Z_][\w-]*:)?definitions\s*>/i, '</definitions>');
+
+    // Normalize bpmndi prefixes to Flowable defaults
     out = out.replace(/<(\w+):BPMNDiagram\b/gi, '<bpmndi:BPMNDiagram');
     out = out.replace(/<\/(\w+):BPMNDiagram>/gi, '</bpmndi:BPMNDiagram>');
     out = out.replace(/<(\w+):BPMNPlane\b/gi, '<bpmndi:BPMNPlane');
@@ -733,6 +741,16 @@ export function toFlowableDefinitionHeader(xml: string): string {
     out = out.replace(/<\/(\w+):BPMNShape>/gi, '</bpmndi:BPMNShape>');
     out = out.replace(/<(\w+):BPMNEdge\b/gi, '<bpmndi:BPMNEdge');
     out = out.replace(/<\/(\w+):BPMNEdge>/gi, '</bpmndi:BPMNEdge>');
+
+    // Align DI/DC prefixes with Flowable output
+    out = out.replace(/<\/?dc:/g, (match) => match.replace('dc:', 'omgdc:'));
+    out = out.replace(/<\/?di:/g, (match) => match.replace('di:', 'omgdi:'));
+
+    // Drop the bpmn: prefix from element tags (Flowable emits un-prefixed elements)
+    out = out.replace(/<\/?bpmn:([A-Za-z_][\w.-]*)/g, (match, name) => `${match.startsWith('</') ? '</' : '<'}${name}`);
+
+    // Variable aggregation children should be unprefixed as well
+    out = out.replace(/<\/?flowable:variable\b/g, (match) => match.replace('flowable:variable', 'variable'));
 
     return out;
   } catch {
@@ -1310,7 +1328,6 @@ export function applyPreExportConfigurations(modeler: any) {
   ensureDefaultOutboundMappingForSendTasks(modeler);
   ensureCorrelationParameterForReceiveTasks(modeler);
   ensureCorrelationParameterForIntermediateCatchEvents(modeler);
-  stripMessageEventDefinitionsForFlowableEvents(modeler);
   ensureCorrelationParameterForStartEvents(modeler);
   ensureStartEventCorrelationConfigurationForStartEvents(modeler);
   ensureCorrelationParameterForBoundaryEvents(modeler);

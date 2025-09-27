@@ -1,4 +1,4 @@
-import { CheckboxEntry, Group, ListGroup, TextFieldEntry, isCheckboxEntryEdited, isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
+import { CheckboxEntry, Group, ListGroup, SelectEntry, TextFieldEntry, isCheckboxEntryEdited, isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 import { useService } from 'bpmn-js-properties-panel';
 import { h } from '@bpmn-io/properties-panel/preact';
 
@@ -12,10 +12,11 @@ import {
   removeEventParameter
 } from '../helpers/flowable-events';
 import { ensureExtensionElements } from '../helpers/ext';
+import { getCorrelationOptions } from '../state/event-loader-state';
 import { isStartEvent } from '../guards';
 
-export function EventTypeEntry(props: { element: BPMNElement }) {
-  const { element } = props;
+export function EventTypeEntry(props: { element: BPMNElement; label?: string }) {
+  const { element, label: overrideLabel } = props;
   const modeling = useService('modeling');
   const bpmnFactory = useService('bpmnFactory');
   const translate = useService('translate');
@@ -69,10 +70,12 @@ export function EventTypeEntry(props: { element: BPMNElement }) {
     } catch {}
   };
 
+  const label = overrideLabel || (translate ? translate('Event key (type)') : 'Event key (type)');
+
   return TextFieldEntry({
     id: 'flowable-eventType',
     element,
-    label: translate ? translate('Event key (type)') : 'Event key (type)',
+    label,
     getValue,
     setValue,
     debounce
@@ -286,6 +289,20 @@ export function EventCorrelationParamNameEntry(props: { element: BPMNElement; id
       modeling.updateModdleProperties(element, parameter, { name: next });
     }
   };
+
+  const options = getCorrelationOptions(bo);
+
+  if (options.length > 1) {
+    const getOptions = () => options.map((name) => ({ value: name, label: name }));
+    return SelectEntry({
+      id,
+      element,
+      label: translate ? translate('Parameter name') : 'Parameter name',
+      getValue,
+      setValue,
+      getOptions
+    });
+  }
 
   return TextFieldEntry({ id, element, label: translate ? translate('Parameter name') : 'Parameter name', getValue, setValue, debounce });
 }

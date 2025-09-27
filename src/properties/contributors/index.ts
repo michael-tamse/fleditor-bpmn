@@ -12,6 +12,7 @@ export { startMessageEvent } from './start-message-event';
 export { messageBoundaryEvent } from './message-boundary-event';
 export { errorStartEvent } from './error-start-event';
 export { errorBoundaryEvent } from './error-boundary-event';
+export { errorEndEvent } from './error-end-event';
 export { businessRuleTask } from './business-rule-task';
 export { multiInstance } from './multi-instance';
 export { variableAggregations } from './variable-aggregations';

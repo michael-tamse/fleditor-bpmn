@@ -21,6 +21,7 @@ export function addFlowableMapping(element: any, which: MappingKind, bpmnFactory
   const values = (ext.get ? ext.get('values') : ext.values) || [];
   const mapping = bpmnFactory.create(`flowable:${which}`, {});
   modeling.updateModdleProperties(element, ext, { values: values.concat([ mapping ]) });
+  return mapping;
 }
 
 export function removeFlowableMapping(element: any, mapping: any, modeling: any) {

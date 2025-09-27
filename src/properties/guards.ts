@@ -50,6 +50,10 @@ export function isStartEvent(element: BPMNElement): boolean {
   return /StartEvent$/.test(getType(element));
 }
 
+export function isEndEvent(element: BPMNElement): boolean {
+  return /EndEvent$/.test(getType(element));
+}
+
 export function isBusinessRuleTask(element: BPMNElement): boolean {
   return /BusinessRuleTask$/.test(getType(element));
 }
@@ -80,6 +84,14 @@ export function isErrorBoundaryEvent(element: BPMNElement): boolean {
 
 export function isErrorStartEvent(element: BPMNElement): boolean {
   if (!isStartEvent(element)) return false;
+  const bo = element.businessObject;
+  const eventDefinitions = bo && bo.eventDefinitions;
+  if (!Array.isArray(eventDefinitions)) return false;
+  return eventDefinitions.some((ed: any) => ed && ed.$type === 'bpmn:ErrorEventDefinition');
+}
+
+export function isErrorEndEvent(element: BPMNElement): boolean {
+  if (!isEndEvent(element)) return false;
   const bo = element.businessObject;
   const eventDefinitions = bo && bo.eventDefinitions;
   if (!Array.isArray(eventDefinitions)) return false;

@@ -252,6 +252,7 @@ Quick anchors (open in IDE):
 - Section: `Outbound event mapping` → list of `<flowable:eventInParameter source target>`.
   - First add is prefilled with `source="${execution.getProcessInstanceBusinessKey()}"`, `target="businessKey"`.
 - Export safety: ensures one default `eventInParameter` and one `<flowable:systemChannel/>` exist if none present.
+- UI pattern: reuse `EventKeyWithPicker` (`src/properties/entries/EventKeyWithPicker.tsx`). It renders the Flowable event key textfield with the `Load…` button on a compact action row beneath the input. The button mirrors the toolbar button appearance (same padding/radius as “Fit”) and centralises the load behaviour for SendTask and other message-send flavours.
 
 ### Receive Task (message receive)
 - General: `Event key (type)` → `<flowable:eventType>` (CDATA).
@@ -263,6 +264,8 @@ Quick anchors (open in IDE):
 - Same three sections as ReceiveTask when NOT a Timer or Error Boundary event.
 - Default `Message` group is removed.
 - Defaults: newly created ICE/Boundary get default correlation parameter (`businessKey` / `${execution.getProcessInstanceBusinessKey()}`), except for Timer or Error Boundary events.
+- Plan: Message Intermediate Throw Event entries will adopt the same `EventKeyWithPicker` pattern so the event key + `Load…` UX matches SendTask.
+- Flowable does not support Message Intermediate Throw Events **or Message End Events**; palette, create/append menu, context pad, and replace menu filters strip those options via `modeler-setup.ts`. Keep these filters intact when upgrading bpmn-js.
 
 ### Start Event (message-style only)
 - Shows the three sections only if Flowable message metadata exists (presence of `<flowable:eventType>` or `<flowable:eventCorrelationParameter>`) or a `bpmn:MessageEventDefinition` is present, and not a Timer Start.

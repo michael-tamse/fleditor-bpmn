@@ -135,6 +135,53 @@ export function handleShapeAdded(state: DiagramTabState, e: any) {
           }
         }
       }
+      if (bo.$type === 'bpmn:EndEvent') {
+        const bpmnFactory = modeler.get('bpmnFactory');
+        const modeling = modeler.get('modeling');
+        const eventBus = modeler.get('eventBus');
+        if (bpmnFactory && modeling) {
+          const rawDefs = bo.get ? bo.get('eventDefinitions') : (bo as any).eventDefinitions;
+          const defs = Array.isArray(rawDefs) ? rawDefs : [];
+          const hasError = defs.some((d: any) => d && d.$type === 'bpmn:ErrorEventDefinition');
+          if (hasError) {
+            let ext = bo.get ? bo.get('extensionElements') : bo.extensionElements;
+            if (!ext) {
+              ext = bpmnFactory.create('bpmn:ExtensionElements', { values: [] });
+              modeling.updateModdleProperties(el, bo, { extensionElements: ext });
+            }
+            const values = (ext.get ? ext.get('values') : ext.values) || [];
+            const outMappings = values.filter((value: any) => {
+              const type = String(((value && value.$type) || '')).toLowerCase();
+              return type === 'flowable:out';
+            });
+            let didUpdate = false;
+            if (!outMappings.length) {
+              const mapping = bpmnFactory.create('flowable:Out', {
+                source: 'errorMessage',
+                target: 'errorMessage'
+              });
+              modeling.updateModdleProperties(el, ext, { values: values.concat([ mapping ]) });
+              didUpdate = true;
+            } else if (outMappings.length === 1) {
+              const mapping = outMappings[0];
+              const source = mapping.get ? mapping.get('source') : mapping.source;
+              const sourceExpression = mapping.get ? mapping.get('sourceExpression') : mapping.sourceExpression;
+              const target = mapping.get ? mapping.get('target') : mapping.target;
+              if (!source && !sourceExpression && !target) {
+                modeling.updateModdleProperties(el, mapping, {
+                  source: 'errorMessage',
+                  sourceExpression: undefined,
+                  target: 'errorMessage'
+                });
+                didUpdate = true;
+              }
+            }
+            if (didUpdate) {
+              try { eventBus && (eventBus as any).fire && (eventBus as any).fire('elements.changed', { elements: [ el ] }); } catch {}
+            }
+          }
+        }
+      }
       if (bo.$type === 'bpmn:CallActivity') {
         const get = (k: string) => (bo.get ? bo.get(k) : (bo as any)[k]);
         const updates: any = {};
@@ -300,6 +347,24 @@ export function setupModelerForState(state: DiagramTabState) {
       installImportModelTransformations(state.modeler);
     });
   }
+
+  const listenerKey = '__flowableShapeListener';
+  const hasListener = Object.prototype.hasOwnProperty.call(state, listenerKey);
+  if (!hasListener) {
+    try {
+      const eventBus = state.modeler.get && state.modeler.get('eventBus', false);
+      if (eventBus && typeof eventBus.on === 'function') {
+        const handler = (event: any) => {
+          try { handleShapeAdded(state, event); } catch {}
+        };
+        ['commandStack.shape.create.postExecute', 'commandStack.shape.append.postExecute'].forEach((type) => {
+          try { eventBus.on(type, handler); } catch {}
+        });
+        (state as any)[listenerKey] = handler;
+      }
+    } catch {}
+  }
+
   bindModelerEvents(state);
   bindDragAndDrop(state);
   applyPropertyPanelVisibility(state);
@@ -311,6 +376,64 @@ export function customizeProviders(currentModeler?: any) {
     if (!m) return;
 
     const injector = m.get('injector');
+    const disallowedEventKeywords = ['conditional', 'signal', 'escalation', 'cancel'];
+    const matchesDisallowedEventKeyword = (value: string) => {
+      const lowered = (value || '').toLowerCase();
+      return disallowedEventKeywords.some((keyword) => lowered.includes(keyword));
+    };
+    const isDisallowedEventEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const eventDefinitionType = String((target && target.eventDefinitionType) || '');
+      if (eventDefinitionType && /bpmn:(Conditional|Signal|Escalation|Cancel)EventDefinition$/.test(eventDefinitionType)) {
+        return true;
+      }
+      const targetType = String((target && target.type) || '');
+      const hasEventContext = /event/.test(loweredKey) || /event/.test(label) || /Event$/.test(targetType);
+      if (!hasEventContext) {
+        return false;
+      }
+      return matchesDisallowedEventKeyword(loweredKey) || matchesDisallowedEventKeyword(label);
+    };
+    const isTransactionEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const targetType = String((target && target.type) || '');
+      if (/bpmn:Transaction$/i.test(targetType)) {
+        return true;
+      }
+      const type = String((entry && entry.type) || '');
+      if (/bpmn:Transaction$/i.test(type)) {
+        return true;
+      }
+      return /transaction/.test(loweredKey) || /transaction/.test(label);
+    };
+    const isCompensationEndEntry = (key: string, entry: any) => {
+      const loweredKey = (key || '').toLowerCase();
+      const label = ((entry && (entry.title || (entry as any).alt || (entry as any).label || '')) + '').toLowerCase();
+      const target = entry && (entry.target || {});
+      const targetType = String((target && target.type) || '');
+      const eventDefinitionType = String((target && target.eventDefinitionType) || '');
+      if (targetType === 'bpmn:EndEvent' && /bpmn:CompensateEventDefinition$/i.test(eventDefinitionType)) {
+        return true;
+      }
+      if (/compensation/.test(loweredKey) && /end/.test(loweredKey)) {
+        return true;
+      }
+      if (/compensation/.test(label) && /end/.test(label)) {
+        return true;
+      }
+      const action = entry && (entry.action || {});
+      const actionOptions = (action as any).options || {};
+      const actionEventDefinitionType = String(actionOptions.eventDefinitionType || '');
+      const actionType = String(action.type || '');
+      if (actionType === 'bpmn:EndEvent' && /bpmn:CompensateEventDefinition$/i.test(actionEventDefinitionType)) {
+        return true;
+      }
+      return false;
+    };
 
     const paletteProvider = injector.get('paletteProvider', false);
     const palette = m.get('palette', false);
@@ -353,6 +476,12 @@ export function customizeProviders(currentModeler?: any) {
           if ((/link/i.test(k) && /event/i.test(k)) || (/\blink\b/.test(title) && /event/.test(title))) {
             delete entries[k];
           }
+          if ((/message/.test(k) && /intermediate/.test(k) && /throw/.test(k)) || (/message/.test(title) && /throw/.test(title) && /event/.test(title))) {
+            delete entries[k];
+          }
+          if ((/message/.test(k) && /end/.test(k)) || (/message/.test(title) && /end/.test(title) && /event/.test(title))) {
+            delete entries[k];
+          }
         });
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
@@ -363,6 +492,15 @@ export function customizeProviders(currentModeler?: any) {
           const v = entries[k];
           const title = ((v && (v.title || (v as any).alt || (v as any).label || '')) + '').toLowerCase();
           if ((/pool/.test(title) || /participant/.test(title)) && (/expanded/.test(title) || /empty/.test(title))) {
+            delete entries[k];
+          }
+        });
+        Object.keys(entries).forEach((k) => {
+          if (
+            isDisallowedEventEntry(k, entries[k]) ||
+            isTransactionEntry(k, entries[k]) ||
+            isCompensationEndEntry(k, entries[k])
+          ) {
             delete entries[k];
           }
         });
@@ -405,6 +543,8 @@ export function customizeProviders(currentModeler?: any) {
         });
         delete entries['append.intermediate-link-catch-event'];
         delete entries['append.intermediate-link-throw-event'];
+        delete entries['append.message-intermediate-event'];
+        delete entries['append.message-end-event'];
 
         Object.keys(entries).forEach((k) => {
           const v = entries[k];
@@ -412,6 +552,16 @@ export function customizeProviders(currentModeler?: any) {
           if ((/complex/i.test(k) && /gateway/i.test(k)) || (/complex/.test(title) && /gateway/.test(title))) delete entries[k];
         });
         delete entries['append.complex-gateway'];
+
+        Object.keys(entries).forEach((k) => {
+          if (
+            isDisallowedEventEntry(k, entries[k]) ||
+            isTransactionEntry(k, entries[k]) ||
+            isCompensationEndEntry(k, entries[k])
+          ) {
+            delete entries[k];
+          }
+        });
 
         return entries;
       };
@@ -461,6 +611,29 @@ export function customizeProviders(currentModeler?: any) {
           if (/complex[- ]?gateway/i.test(id) || (/complex/i.test(label) && /gateway/i.test(label)) || /bpmn:ComplexGateway$/.test(targetType)) {
             return false;
           }
+          if ((/message/.test(id) && /intermediate/.test(id) && /throw/.test(id)) || (/message/.test(label) && /throw/.test(label) && /event/.test(label))) {
+            return false;
+          }
+          if (targetType === 'bpmn:IntermediateThrowEvent' && entry && entry.target && entry.target.eventDefinitionType === 'bpmn:MessageEventDefinition') {
+            return false;
+          }
+          if ((/message/.test(id) && /end/.test(id)) || (/message/.test(label) && /end/.test(label) && /event/.test(label))) {
+            return false;
+          }
+          if (targetType === 'bpmn:EndEvent' && entry && entry.target && entry.target.eventDefinitionType === 'bpmn:MessageEventDefinition') {
+            return false;
+          }
+          if (
+            isDisallowedEventEntry(id, entry) ||
+            isDisallowedEventEntry(targetType, entry) ||
+            matchesDisallowedEventKeyword(label) ||
+            isTransactionEntry(id, entry) ||
+            isTransactionEntry(targetType, entry) ||
+            isCompensationEndEntry(id, entry) ||
+            isCompensationEndEntry(targetType, entry)
+          ) {
+            return false;
+          }
           if (/toggle-loop/i.test(id) || (/\bloop\b/i.test(label) && !/multi/i.test(label))) {
             return false;
           }
@@ -479,10 +652,55 @@ export function customizeProviders(currentModeler?: any) {
             if (/toggle-loop/i.test(id)) return false;
             if (/\bloop\b/i.test(title) && !/multi/i.test(title)) return false;
             if (/loop/i.test(cls) && !/multi/i.test(cls)) return false;
+            if (/toggle-adhoc/i.test(id)) return false;
+            if (/ad[- ]?hoc/i.test(title)) return false;
+            if (/ad[- ]?hoc/i.test(cls)) return false;
             return true;
           });
         };
       }
+    }
+
+    const appendMenuProvider = injector.get('appendMenuProvider', false);
+    if (appendMenuProvider && typeof appendMenuProvider.getPopupMenuEntries === 'function') {
+      const originalAppend = appendMenuProvider.getPopupMenuEntries.bind(appendMenuProvider);
+      appendMenuProvider.getPopupMenuEntries = function(element: any) {
+        const entries = originalAppend(element) || {};
+        Object.keys(entries).forEach((id) => {
+          if (/message-(intermediate-throw|end)/.test(id)) delete entries[id];
+        });
+        Object.keys(entries).forEach((id) => {
+          if (
+            isDisallowedEventEntry(id, entries[id]) ||
+            isTransactionEntry(id, entries[id]) ||
+            isCompensationEndEntry(id, entries[id])
+          ) {
+            delete entries[id];
+          }
+        });
+        return entries;
+      };
+    }
+
+    const createMenuProvider = injector.get('createMenuProvider', false);
+    if (createMenuProvider && typeof createMenuProvider.getPopupMenuEntries === 'function') {
+      const originalCreate = createMenuProvider.getPopupMenuEntries.bind(createMenuProvider);
+      createMenuProvider.getPopupMenuEntries = function(element?: any) {
+        const entries = originalCreate(element) || {};
+        Object.keys(entries).forEach((id) => {
+          if (/create-message-(intermediate-throw|end)/.test(id)) delete entries[id];
+        });
+        Object.keys(entries).forEach((id) => {
+          if (
+            isDisallowedEventEntry(id, entries[id]) ||
+            isTransactionEntry(id, entries[id]) ||
+            isCompensationEndEntry(id, entries[id])
+          ) {
+            delete entries[id];
+          }
+        });
+        return entries;
+      };
     }
 
     const popupMenu = injector.get('popupMenu', false);
@@ -502,7 +720,10 @@ export function customizeProviders(currentModeler?: any) {
                 /data\s+store\s+reference/.test(label) ||
                 (/pool/.test(label) && (/(expanded|empty)/.test(label))) ||
                 (/sub\s*-?process/.test(label) && /collapsed/.test(label)) ||
-                (/script/.test(label) && /task/.test(label))
+                (/script/.test(label) && /task/.test(label)) ||
+                isDisallowedEventEntry(id, e) ||
+                isTransactionEntry(id, e) ||
+                isCompensationEndEntry(id, e)
               );
             };
             Object.keys(entries).forEach((id) => {

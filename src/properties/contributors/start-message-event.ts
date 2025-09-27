@@ -2,8 +2,9 @@ import { isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 
 import { Contributor } from '../types';
 import { isStartEvent } from '../guards';
-import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
-import { EventTypeEntry, createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import { findGroup, insertAfterIdOrName, ensureGeneralSeparator, removeGroup } from '../group-utils';
+import { createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
+import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
 function hasFlowableMessageMetadata(bo: any) {
   const ext = bo && (bo.get ? bo.get('extensionElements') : bo.extensionElements);
@@ -31,6 +32,8 @@ export const startMessageEvent: Contributor = (element, groups) => {
   const relevant = !hasTimerDefinition(bo) && (hasFlowableMessageMetadata(bo) || hasMessageEventDefinition(bo));
   if (!relevant) return;
 
+  removeGroup(groups, 'message');
+
   const general = findGroup(groups, 'general');
   if (!general || !Array.isArray(general.entries)) return;
 
@@ -38,7 +41,7 @@ export const startMessageEvent: Contributor = (element, groups) => {
   if (!hasEventType) {
     insertAfterIdOrName(general.entries, {
       id: 'flowable-eventType',
-      component: EventTypeEntry,
+      component: EventKeyWithPicker,
       isEdited: isTextFieldEntryEdited
     });
   }
