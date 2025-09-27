@@ -28,6 +28,7 @@ export {
   createCorrelationParametersGroup
 } from '../entries/event-registry';
 export { GeneralSpacerEntry } from '../entries/spacer';
+export { CreateIdButton } from '../entries/create-id';
 export {
   AsyncEntry,
   AsyncLeaveEntry,

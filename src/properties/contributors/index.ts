@@ -16,3 +16,4 @@ export { errorEndEvent } from './error-end-event';
 export { businessRuleTask } from './business-rule-task';
 export { multiInstance } from './multi-instance';
 export { variableAggregations } from './variable-aggregations';
+export { generalIdFromName } from './general-id-from-name';

@@ -17,12 +17,14 @@ import {
   errorEndEvent,
   businessRuleTask,
   multiInstance,
-  variableAggregations
+  variableAggregations,
+  generalIdFromName
 } from './properties/contributors';
 
 import type { BPMNElement } from './properties/types';
 
 const contribute = compose(
+  generalIdFromName,
   serviceTaskGeneral,
   sequenceFlowCondition,
   executionFlags,
