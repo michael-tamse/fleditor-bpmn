@@ -3,53 +3,75 @@
 Dieses Dokument enthält wichtige Informationen für Claude zur Arbeit mit diesem BPMN Editor Projekt.
 
 ## Projekt Überblick
-- **Typ**: Lightweight BPMN Editor basierend auf `bpmn-js` + Properties Panel
-- **Ziel**: Einfache UX, entfernt nicht-unterstützte BPMN-Konstrukte, fügt Flowable-spezifische Properties hinzu
+- **Typ**: Multi-Format Editor für BPMN, DMN und Event Definitions basierend auf `bpmn-js` + `dmn-js`
+- **Ziel**: Einfache UX mit Flowable-spezifischen Properties, Multi-Tab Support, Event Registry Integration
 - **Stil**: Minimale, fokussierte Änderungen. Vermeide breite Refactorings.
 
 ## Tech Stack
-- **Core**: `bpmn-js`, `bpmn-js-properties-panel`, `@bpmn-io/properties-panel` (Preact-basiert)
-- **Build**: Vite (Node 18+ empfohlen)
-- **Sprache**: TypeScript (ES Module)
+- **Core**: `bpmn-js` (v11.0.0), `dmn-js` (v17.4.0), `bpmn-js-properties-panel` (v1.26.0), `@bpmn-io/properties-panel` (v2.2.0)
+- **Build**: Vite (v7.1.5)
+- **Sprache**: TypeScript (v5.9.2, ES Module)
 - **Sidecar**: Lightweight Protocol + Transports für Embedding in Angular/Tauri/Browser
-- **Tauri**: Minimaler Host Harness (kein UI) für Datei I/O
+- **Tauri**: v2.8.x mit minimaler Host Harness für Datei I/O
+- **State Management**: Custom reducer pattern mit zentralem store
 
 ## Wichtige Befehle
 ```bash
 # Development
 npm run dev
+npm run dev:host    # Browser host variant
 
-# Build & Test
+# Build
 npm run build
-npm test
+npm run preview
 
-# Tauri
+# Tauri Desktop
 npm run dev:tauri
 npm run build:tauri
 
-# Windows Builds
+# Windows Specific
 npm run build:win:nsis
 npm run build:win:msi
+npm run build:win:all
 npm run build:win
 ```
 
+## Aktuelle Tests
+- Keine nativen Test-Suites vorhanden
+- Testing erfolgt manuell über `npm run build` + Preview
+- Verwende immer `npm run build` nach Änderungen
+
 ## Datei Struktur (Wichtigste Dateien)
-- `src/main.ts`: App Bootstrap, Canvas + Properties Panel Wiring, Datei I/O, Zoom
-- `src/flowable-moddle.ts`: Flowable Moddle Extension (Namespaces und Types)
-- `src/flowable-properties-provider.ts`: Provider Wrapper, importiert alle Contributors
-- `src/properties/helpers/entries.ts`: Zentrale Export-Oberfläche für Properties Panel Entry Components
-- `src/properties/contributors/`: Fokussierte Contributor Module für verschiedene BPMN-Elemente
+- `src/main.ts`: App Bootstrap, Sidecar Init, Module Dependencies, Event Handlers
+- `src/tab-manager.ts`: Multi-Tab State Management, Tab Creation/Switching
+- `src/modeler-setup.ts`: BPMN/DMN Modeler Configuration, Shape Handling
+- `src/file-operations.ts`: File I/O, XML Processing, Save/Load Operations
+- `src/ui-controls.ts`: Toolbar, Status, Zoom, Visibility Controls
+- `src/change-tracker.ts`: Dirty State Management, XML Baseline Hashing
+
+### Properties Panel Architecture
+- `src/flowable-properties-provider.ts`: Provider Wrapper, registriert alle Contributors
+- `src/properties/contributors/index.ts`: Zentrale Contributors Export
+- `src/properties/contributors/`: Element-spezifische Contributors (18 Module)
+- `src/properties/helpers/entries.ts`: UI Entry Components Export Interface
 - `src/properties/entries/`: Konkrete UI Entry Implementierungen
 
-### Tabs (Multi-Diagram Support)
-- `src/bpmn-tabs/tabs.ts`: Accessible Tabs Manager
-- `src/bpmn-tabs/tabs.css`: Tab Bar Styles
-- `src/bpmn-tabs/tabs.html`: Markup Referenz
+### Multi-Tab Support
+- `src/bpmn-tabs/tabs.ts`: Accessible Tabs Manager mit Keyboard Navigation
+- `src/bpmn-tabs/tabs-usage-bpmn.ts`: Tab Specific BPMN Integration
+- `src/state/`: Redux-style State Management (store, reducer, selectors)
+
+### Multi-Format Support
+- `src/dmn-support.ts`: DMN Decision Table Integration
+- `src/dmn-tab.ts`: DMN Tab Management
+- `src/dmn/dmn-factory.ts`: DMN Modeler Factory
+- `src/event-editor/`: Event Registry Editor für Event Definitions
 
 ### Sidecar (Component ↔ Host Interface)
-- `src/sidecar/shared/protocol.ts`: Protocol Definition, Message Types
-- `src/sidecar/transports/`: DOM/postMessage/Memory Transports
-- `src/sidecar/bridge.ts`: Request/Response/Event Bridge
+- `src/sidecar/shared/protocol.ts`: Protocol v1.0.0, Message Types, Capabilities
+- `src/sidecar/transports/`: Transport Layer (DOM/postMessage/Memory)
+- `src/sidecar/bridge.ts`: Request/Response/Event Bridge mit Handshake
+- `src/integrations/`: Editor Registry, Event Bridge für Host Communication
 
 ## Development Konventionen
 
@@ -70,17 +92,20 @@ npm run build:win
 - Respektiere `isEdited` Helpers: `isTextFieldEntryEdited`, `isCheckboxEntryEdited`
 - Einfügungen immer nach `ID` (fallback `Name`) für stabile UX
 
-## Multi-Tab Support
-- Editor unterstützt mehrere BPMN Diagramme parallel
-- Jeder Tab besitzt einen separaten `bpmn-js` Modeler und Properties Panel
-- Dirty State Tracking über gehashte XML Baseline
-- Verwende `runWithState(state, fn)` für Tab-spezifische Operationen
+## Multi-Tab & Multi-Format Support
+- Editor unterstützt parallel: BPMN Diagramme, DMN Decision Tables, Event Definitions
+- Jeder Tab besitzt einen separaten Modeler (bpmn-js/dmn-js/event-editor) und Properties Panel
+- State Management über Map<string, DiagramTabState> mit Dirty Tracking
+- Tab-spezifische Operationen: `runWithState(state, fn)` für sichere State Isolation
+- Tab-übergreifende Features: Duplicate Detection, Auto-Save, Persistence
 
-## Sidecar Integration
+## Sidecar Integration (Host Embedding)
 - Editor läuft standalone, kann aber mit externem Host integriert werden
-- Unterstützte Operationen: `doc.load`, `doc.save`, `doc.saveSvg`, `doc.openExternal`
-- UI Operationen: `ui.setPropertyPanel`, `ui.setMenubar`
-- Auto-Detection: iframe → postMessage, sonst DOM CustomEvents
+- **Unterstützte Operationen**:
+  - `doc.load`, `doc.loadMany`, `doc.save`, `doc.saveSvg`, `doc.openExternal`
+  - `ui.setPropertyPanel`, `ui.setMenubar`
+- **Auto-Detection**: iframe → postMessage, sonst DOM CustomEvents
+- **Protocol**: `bpmn-sidecar` v1.0.0 mit Capability Negotiation
 
 ## Tauri v2 Capabilities
 - Permissions in `src-tauri/capabilities/main.json` definiert
@@ -88,9 +113,10 @@ npm run build:win
 - FS Permissions auf `$HOME/**` beschränkt
 
 ## Testing & Validation
-- Immer `npm run build` nach Änderungen ausführen
+- **WICHTIG**: Immer `npm run build` nach Änderungen ausführen
+- Keine nativen Test-Suites oder Linting-Scripts vorhanden
+- Manual Testing über `npm run dev` und `npm run preview`
 - Keine Tests committen ohne explizite Aufforderung
-- Prüfe Linting und Typecheck Befehle im package.json
 
 ## Import/Export Verhalten
 ### Import (Model Updates für bessere UX)
@@ -124,6 +150,13 @@ npm run build:win
 - Keine git commits ohne explizite Aufforderung
 
 ## Häufige Aufgaben
+
+### Neue Property hinzufügen
+1. **Entry Component erstellen** in `src/properties/entries/`
+2. **Entry exportieren** in `src/properties/helpers/entries.ts`
+3. **Contributor erstellen/erweitern** in `src/properties/contributors/`
+4. **Contributor registrieren** in `src/properties/contributors/index.ts` und `src/flowable-properties-provider.ts`
+
 ### Checkbox Property hinzufügen
 ```typescript
 // Entry Component mit CheckboxEntry und useService('modeling')
@@ -137,6 +170,12 @@ npm run build:win
 // bo.get('ns:prop') für Fetch, updateProperties für Persist
 // Für nested/moddle: bpmnFactory + updateModdleProperties
 ```
+
+### Neuen Tab-Typ hinzufügen
+1. **DiagramTabState** erweitern in `src/types.ts`
+2. **Tab Creation Logic** in `src/tab-manager.ts`
+3. **Modeler Setup** in `src/modeler-setup.ts`
+4. **File Operations** in `src/file-operations.ts`
 
 ## Troubleshooting
 - **Build fails**: Rerun mit erhöhten Berechtigungen
