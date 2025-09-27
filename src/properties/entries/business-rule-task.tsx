@@ -84,22 +84,20 @@ export function DecisionTableReferenceEntry(props: { element: BPMNElement }) {
       <label className="bio-properties-panel-label" htmlFor={inputId}>
         {label}
       </label>
-      <div className="bio-properties-panel-textfield">
+      <div className="bio-properties-panel-textfield decision-ref-with-button-textfield">
         <input
           id={inputId}
           name="flowable-decisionTableReferenceKey"
           type="text"
           spellCheck="false"
           autoComplete="off"
-          className="bio-properties-panel-input"
+          className="bio-properties-panel-input decision-ref-input-with-button"
           value={value}
           onInput={onInput}
         />
-      </div>
-      <div className="flowable-load-actions">
         <button
           type="button"
-          className="bio-properties-panel-button flowable-load-button"
+          className="bio-properties-panel-button inline-load-button"
           onClick={onPick}
         >
           {buttonLabel}

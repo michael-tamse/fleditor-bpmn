@@ -1,15 +1,4 @@
-.flowable-event-key-entry,
-.flowable-load-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: 0.375rem;
-}
-
-.flowable-event-key-entry .bio-properties-panel-textfield,
-.flowable-load-entry .bio-properties-panel-textfield {
-  margin: 0;
-}
-
+/* Legacy styles kept for backward compatibility if needed elsewhere */
 .flowable-event-key-actions,
 .flowable-load-actions {
   display: flex;
@@ -71,4 +60,65 @@
 .inline-create-id-button:hover {
   border-color: #cbd5e1;
   background: #f1f5f9;
+}
+
+/* Event key field with inline Load button styling */
+.event-key-with-button-textfield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.event-key-input-with-button {
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-load-button {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: #ffffff;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: auto;
+  line-height: 1.2;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.inline-load-button:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+/* Decision reference field with inline Load button styling */
+.decision-ref-with-button-textfield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.decision-ref-input-with-button {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Called element field with inline Load button styling */
+.called-element-with-button-textfield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.called-element-input-with-button {
+  flex: 1;
+  min-width: 0;
 }

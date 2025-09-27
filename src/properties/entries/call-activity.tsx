@@ -71,22 +71,20 @@ export function CalledElementEntry(props: { element: BPMNElement }) {
       <label className="bio-properties-panel-label" htmlFor={inputId}>
         {label}
       </label>
-      <div className="bio-properties-panel-textfield">
+      <div className="bio-properties-panel-textfield called-element-with-button-textfield">
         <input
           id={inputId}
           name="bpmn-calledElement"
           type="text"
           spellCheck="false"
           autoComplete="off"
-          className="bio-properties-panel-input"
+          className="bio-properties-panel-input called-element-input-with-button"
           value={value}
           onInput={onInput}
         />
-      </div>
-      <div className="flowable-load-actions">
         <button
           type="button"
-          className="bio-properties-panel-button flowable-load-button"
+          className="bio-properties-panel-button inline-load-button"
           onClick={onPick}
         >
           {buttonLabel}
