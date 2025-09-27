@@ -2,7 +2,7 @@ import { isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 
 import { Contributor } from '../types';
 import { isStartEvent } from '../guards';
-import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
+import { findGroup, insertAfterIdOrName, ensureGeneralSeparator, removeGroup } from '../group-utils';
 import { createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
 import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
@@ -31,6 +31,8 @@ export const startMessageEvent: Contributor = (element, groups) => {
   const bo = element.businessObject;
   const relevant = !hasTimerDefinition(bo) && (hasFlowableMessageMetadata(bo) || hasMessageEventDefinition(bo));
   if (!relevant) return;
+
+  removeGroup(groups, 'message');
 
   const general = findGroup(groups, 'general');
   if (!general || !Array.isArray(general.entries)) return;

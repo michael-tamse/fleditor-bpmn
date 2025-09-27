@@ -2,12 +2,14 @@ import { isTextFieldEntryEdited } from '@bpmn-io/properties-panel';
 
 import { Contributor } from '../types';
 import { isBoundaryEvent, isMessageBoundaryEvent } from '../guards';
-import { findGroup, insertAfterIdOrName, ensureGeneralSeparator } from '../group-utils';
+import { findGroup, insertAfterIdOrName, ensureGeneralSeparator, removeGroup } from '../group-utils';
 import { createCorrelationParametersGroup, createInboundEventMappingGroup, GeneralSpacerEntry } from '../helpers/entries';
 import EventKeyWithPicker from '../entries/EventKeyWithPicker';
 
 export const messageBoundaryEvent: Contributor = (element, groups) => {
   if (!isBoundaryEvent(element) || !isMessageBoundaryEvent(element) || !Array.isArray(groups)) return;
+
+  removeGroup(groups, 'message');
 
   const general = findGroup(groups, 'general');
   if (!general || !Array.isArray(general.entries)) return;

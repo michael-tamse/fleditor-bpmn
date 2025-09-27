@@ -4,6 +4,17 @@ export function findGroup(groups: Groups, id: string) {
   return Array.isArray(groups) ? groups.find((group) => group && group.id === id) : undefined;
 }
 
+export function removeGroup(groups: Groups, id: string) {
+  if (!Array.isArray(groups)) return;
+
+  for (let idx = groups.length - 1; idx >= 0; idx -= 1) {
+    const group = groups[idx];
+    if (group && group.id === id) {
+      groups.splice(idx, 1);
+    }
+  }
+}
+
 export function insertAfterIdOrName(entries: any[], entry: any, offset = 1) {
   if (!Array.isArray(entries)) return;
   let index = entries.findIndex((item: any) => item && item.id === 'id');
