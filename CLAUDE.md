@@ -52,9 +52,10 @@ npm run build:win
 ### Properties Panel Architecture
 - `src/flowable-properties-provider.ts`: Provider Wrapper, registriert alle Contributors
 - `src/properties/contributors/index.ts`: Zentrale Contributors Export
-- `src/properties/contributors/`: Element-spezifische Contributors (18 Module)
+- `src/properties/contributors/`: Element-spezifische Contributors (20+ Module)
 - `src/properties/helpers/entries.ts`: UI Entry Components Export Interface
 - `src/properties/entries/`: Konkrete UI Entry Implementierungen
+- `src/properties/styles/properties-panel-ext.css`: Custom Styling für Inline-Buttons und Layout
 
 ### Multi-Tab Support
 - `src/bpmn-tabs/tabs.ts`: Accessible Tabs Manager mit Keyboard Navigation
@@ -91,6 +92,13 @@ npm run build:win
 - Verwende `updateModdleProperties` für nested/moddle Instanzen
 - Respektiere `isEdited` Helpers: `isTextFieldEntryEdited`, `isCheckboxEntryEdited`
 - Einfügungen immer nach `ID` (fallback `Name`) für stabile UX
+
+### Inline Button Layout Pattern
+- **Standard Pattern**: Buttons in separaten divs unterhalb des Input-Felds
+- **Inline Pattern**: Button direkt in `bio-properties-panel-textfield` div
+- **CSS Klassen**: `*-with-button-textfield`, `*-input-with-button`, `inline-*-button`
+- **Layout**: `display: flex`, Input mit `flex: 1`, Button mit `flex-shrink: 0`
+- **Implementiert in**: Name Field (Create ID), Send Task (Load), Business Rule Task (Load), Call Activity (Load)
 
 ## Multi-Tab & Multi-Format Support
 - Editor unterstützt parallel: BPMN Diagramme, DMN Decision Tables, Event Definitions
@@ -177,10 +185,50 @@ npm run build:win
 3. **Modeler Setup** in `src/modeler-setup.ts`
 4. **File Operations** in `src/file-operations.ts`
 
+### Inline Button zu Input-Feld hinzufügen
+```typescript
+// 1. Komponente mit inline Button struktur erstellen
+<div className="bio-properties-panel-textfield my-field-with-button-textfield">
+  <input className="bio-properties-panel-input my-input-with-button" />
+  <button className="bio-properties-panel-button inline-my-button">Text</button>
+</div>
+
+// 2. CSS für das neue Layout hinzufügen
+.my-field-with-button-textfield {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+}
+.my-input-with-button {
+  flex: 1; min-width: 0;
+}
+```
+
+### ID Generation Pattern
+```typescript
+// Name zu CamelCase ID konvertieren mit Duplikat-Erkennung
+function sanitizeToId(name: string): string
+function generateUniqueId(baseId: string, elementRegistry: any): string
+// Verwendet in: NameWithInlineButton, CreateIdButton
+```
+
+## Aktuelle UI Improvements
+### Inline Button Implementierungen (2024)
+- **Name Field**: "Create ID" Button für automatische ID-Generierung aus Namen
+- **Send Task Event Key**: "Load..." Button inline für Event-Datei Upload
+- **Business Rule Task**: "Load..." Button inline für DMN-Datei Upload
+- **Call Activity**: "Load..." Button inline für BPMN-Datei Upload
+- **Pattern**: Alle verwenden `bio-properties-panel-textfield` mit Flexbox Layout
+
+### CSS Framework Erweiterungen
+- `properties-panel-ext.css`: Custom Styling für inline Buttons
+- Responsive Button-Input Layout mit `flex: 1` und `gap: 8px`
+- Einheitliche Hover-States und Button-Sizing
+- Legacy CSS für Backward Compatibility beibehalten
+
 ## Troubleshooting
 - **Build fails**: Rerun mit erhöhten Berechtigungen
 - **Properties nicht updaten**: Prüfe `updateProperties` vs `updateModdleProperties`
 - **Entry nicht gezeigt**: Verifiziere `getGroups` Conditions und Group ID Match
+- **Inline Button Styling**: Prüfe CSS Import und korrekte Klassen-Namen
 - **Permissions denied**: Prüfe `src-tauri/capabilities/main.json`
 
 ---
