@@ -17,12 +17,15 @@ import {
   errorEndEvent,
   businessRuleTask,
   multiInstance,
-  variableAggregations
+  variableAggregations,
+  generalIdFromName,
+  generalNameWithInlineButton
 } from './properties/contributors';
 
 import type { BPMNElement } from './properties/types';
 
 const contribute = compose(
+  generalNameWithInlineButton,
   serviceTaskGeneral,
   sequenceFlowCondition,
   executionFlags,

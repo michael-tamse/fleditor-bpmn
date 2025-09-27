@@ -2,11 +2,11 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Flowable BPMN Editor",
   "version": "1.0.0",
-  "identifier": "de.tamse.project.fleditorbpmn",
+  "identifier": "de.tamse.process.fleditorbpmn",
   "build": {
     "beforeDevCommand": "vite --strictPort --port 5173",
     "beforeBuildCommand": "vite build",
-    "devUrl": "http://localhost:5173/index.html",
+    "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
   "app": {

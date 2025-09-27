@@ -214,22 +214,20 @@ export function EventKeyWithPicker(props: EventKeyWithPickerProps) {
       <label className="bio-properties-panel-label" htmlFor={labelId}>
         {label}
       </label>
-      <div className="bio-properties-panel-textfield">
+      <div className="bio-properties-panel-textfield event-key-with-button-textfield">
         <input
           id={labelId}
           name="flowable-eventType"
           type="text"
           spellCheck="false"
           autoComplete="off"
-          className="bio-properties-panel-input"
+          className="bio-properties-panel-input event-key-input-with-button"
           value={inputValue}
           onInput={onInput}
         />
-      </div>
-      <div className="flowable-event-key-actions">
         <button
           type="button"
-          className="bio-properties-panel-button flowable-event-key-button"
+          className="bio-properties-panel-button inline-load-button"
           onClick={onPick}
         >
           {buttonLabel}
