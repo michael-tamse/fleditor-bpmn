@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^2.2.0",
-    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-fs": "^2.4.2",
     "bpmn-js": "^11.0.0",
@@ -25,7 +25,7 @@
     "dmn-js": "^17.4.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.8.4",
+    "@tauri-apps/cli": "^2",
     "minimist": "^1.2.8",
     "ts-morph": "^27.0.0",
     "ts-node": "^10.9.2",

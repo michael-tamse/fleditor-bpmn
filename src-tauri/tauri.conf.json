@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "identifier": "de.tamse.process.fleditorbpmn",
   "build": {
-    "beforeDevCommand": "vite --strictPort --port 5173",
-    "beforeBuildCommand": "vite build",
-    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",      
+    "devUrl": "http://localhost:5173",   
+    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {

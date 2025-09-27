@@ -63,8 +63,8 @@ export function NameWithInlineButton(props: NameWithInlineButtonProps) {
   };
 
   const setValue = (value: string) => {
-    const trimmedValue = (value || '').trim() || undefined;
-    modeling.updateProperties(element, { name: trimmedValue });
+    const cleanValue = value || '';
+    modeling.updateProperties(element, { name: cleanValue || undefined });
   };
 
   const onInput = (event: Event) => {
