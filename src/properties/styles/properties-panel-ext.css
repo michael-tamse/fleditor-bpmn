@@ -37,3 +37,38 @@
   border-color: #cbd5e1;
   background: #f1f5f9;
 }
+
+/* Name field with inline button styling */
+.name-with-button-textfield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.name-input-with-button {
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-create-id-button {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: #ffffff;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: auto;
+  line-height: 1.2;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.inline-create-id-button:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}

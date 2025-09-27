@@ -29,6 +29,7 @@ export {
 } from '../entries/event-registry';
 export { GeneralSpacerEntry } from '../entries/spacer';
 export { CreateIdButton } from '../entries/create-id';
+export { NameWithInlineButton } from '../entries/name-with-inline-button';
 export {
   AsyncEntry,
   AsyncLeaveEntry,

@@ -17,3 +17,4 @@ export { businessRuleTask } from './business-rule-task';
 export { multiInstance } from './multi-instance';
 export { variableAggregations } from './variable-aggregations';
 export { generalIdFromName } from './general-id-from-name';
+export { generalNameWithInlineButton } from './general-name-with-inline-button';
