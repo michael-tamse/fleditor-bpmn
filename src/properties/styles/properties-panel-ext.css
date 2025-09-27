@@ -1,19 +1,23 @@
-.flowable-event-key-entry {
+.flowable-event-key-entry,
+.flowable-load-entry {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   row-gap: 0.375rem;
 }
 
-.flowable-event-key-entry .bio-properties-panel-textfield {
+.flowable-event-key-entry .bio-properties-panel-textfield,
+.flowable-load-entry .bio-properties-panel-textfield {
   margin: 0;
 }
 
-.flowable-event-key-actions {
+.flowable-event-key-actions,
+.flowable-load-actions {
   display: flex;
   justify-content: flex-end;
 }
 
-.flowable-event-key-button {
+.flowable-event-key-button,
+.flowable-load-button {
   margin: 0;
   padding: 6px 10px;
   border-radius: 6px;
@@ -28,7 +32,8 @@
   line-height: 1.2;
 }
 
-.flowable-event-key-button:hover {
+.flowable-event-key-button:hover,
+.flowable-load-button:hover {
   border-color: #cbd5e1;
   background: #f1f5f9;
 }
