@@ -516,7 +516,6 @@ export function applyPreExportConfigurations(currentModeler?: any) {
   ensureDefaultOutboundMappingForSendTasks(m);
   ensureCorrelationParameterForReceiveTasks(m);
   ensureCorrelationParameterForIntermediateCatchEvents(m);
-  stripMessageEventDefinitionsForFlowableEvents(m);
   ensureCorrelationParameterForStartEvents(m);
   ensureCorrelationParameterForBoundaryEvents(m);
   ensureSystemChannelForSendTasks(m);

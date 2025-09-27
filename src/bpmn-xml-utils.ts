@@ -1328,7 +1328,6 @@ export function applyPreExportConfigurations(modeler: any) {
   ensureDefaultOutboundMappingForSendTasks(modeler);
   ensureCorrelationParameterForReceiveTasks(modeler);
   ensureCorrelationParameterForIntermediateCatchEvents(modeler);
-  stripMessageEventDefinitionsForFlowableEvents(modeler);
   ensureCorrelationParameterForStartEvents(modeler);
   ensureStartEventCorrelationConfigurationForStartEvents(modeler);
   ensureCorrelationParameterForBoundaryEvents(modeler);
