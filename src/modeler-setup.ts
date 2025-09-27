@@ -652,6 +652,9 @@ export function customizeProviders(currentModeler?: any) {
             if (/toggle-loop/i.test(id)) return false;
             if (/\bloop\b/i.test(title) && !/multi/i.test(title)) return false;
             if (/loop/i.test(cls) && !/multi/i.test(cls)) return false;
+            if (/toggle-adhoc/i.test(id)) return false;
+            if (/ad[- ]?hoc/i.test(title)) return false;
+            if (/ad[- ]?hoc/i.test(cls)) return false;
             return true;
           });
         };
