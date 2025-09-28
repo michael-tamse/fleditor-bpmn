@@ -14,7 +14,8 @@
     "build:win:msi": "tauri build --bundles msi",
     "build:win:all": "tauri build --bundles nsis,msi",
     "build:win": "tauri build --bundles nsis,msi",
-    "generate:third-party": "pnpm licenses ls > THIRD_PARTY.md"
+    "generate:third-party": "node scripts/third-party-from-pnpm.mjs",
+    "generate:third-party:prod": "OUT=THIRD_PARTY.md PROD=true node scripts/third-party-from-pnpm.mjs"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^2.2.0",
@@ -31,7 +32,9 @@
     "ts-morph": "^27.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "vite": "^7.1.5",
+    "cross-env": "^7.0.3",
+    "license-checker-rseidelsohn": "^4.4.2"    
   },
   "overrides": {
     "@bpmn-io/feel-editor": "^1.12.0"
