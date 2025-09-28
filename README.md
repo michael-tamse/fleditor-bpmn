@@ -92,6 +92,23 @@ Hinweise für Windows‑Builds:
 - **Inline Editing**: Moderne UI mit intelligenten Eingabefeldern und Buttons
 - **Auto-ID Generation**: Automatische Generierung von eindeutigen IDs aus Element-Namen
 
+## Screenshots
+
+Einige Eindrücke aus der Anwendung:
+
+![BPMN-Editor](docs/BPMN-Editor.png)
+
+*Hauptansicht des Editors mit BPMN-Diagramm*
+
+![DMN-Editor](docs/DMN-Editor.png)
+
+*Bearbeiten von Elementen im Properties Panel*
+
+![Event-Editor](docs/Event-Editor.png)
+
+*Bearbeiten von Elementen im Properties Panel*
+
+
 ## Technologien
 
 ### Core Libraries
