@@ -13,7 +13,8 @@
     "build:win:nsis": "tauri build --bundles nsis",
     "build:win:msi": "tauri build --bundles msi",
     "build:win:all": "tauri build --bundles nsis,msi",
-    "build:win": "tauri build --bundles nsis,msi"
+    "build:win": "tauri build --bundles nsis,msi",
+    "generate:third-party": "pnpm licenses ls > THIRD_PARTY.md"
   },
   "dependencies": {
     "@bpmn-io/properties-panel": "^2.2.0",
