@@ -2,10 +2,6 @@
 
 Ein vielseitiger Multi-Format Editor zum Erstellen und Bearbeiten von BPMN-Diagrammen, DMN-Entscheidungstabellen und Event-Definitionen. Basiert auf den bewährten [bpmn-js](https://github.com/bpmn-io/bpmn-js) und [dmn-js](https://github.com/bpmn-io/dmn-js) Bibliotheken mit Fokus auf Flowable-spezifische Eigenschaften und eine intuitive Benutzeroberfläche.
 
-## Über dieses Projekt
-
-Dies ist mein erstes "Vibe-Coding" Projekt mit GPT-Codex und Claude Code. Es hat mir unglaublich viel Spaß gemacht, auch wenn ich keine Ahnung von TypeScript-Programmierung habe und daher nicht beurteilen kann, wie gut oder schlecht der generierte Code ist. Mit dem fertigen Editor bin ich jedoch sehr zufrieden - er erfüllt alle meine Anforderungen und bietet eine moderne, effiziente Arbeitsumgebung für BPMN-Modellierung.
-
 ## Voraussetzungen
 
 - [Node.js](https://nodejs.org/) und npm
@@ -102,11 +98,11 @@ Einige Eindrücke aus der Anwendung:
 
 ![DMN-Editor](docs/DMN-Editor.png)
 
-*Bearbeiten von Elementen im Properties Panel*
+*Bearbeiten eine Entscheidungstabelle*
 
 ![Event-Editor](docs/Event-Editor.png)
 
-*Bearbeiten von Elementen im Properties Panel*
+*Bearbeiten eines Events*
 
 
 ## Technologien
