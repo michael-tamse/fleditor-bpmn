@@ -219,9 +219,9 @@ export function wrapDmnTableValuesInCDATA(xml: string): string {
         const decodedContent = trimmedContent
           .replace(/&lt;/g, '<')
           .replace(/&gt;/g, '>')
-          .replace(/&amp;/g, '&')
           .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'");
+          .replace(/&#39;/g, "'")
+          .replace(/&amp;/g, '&');
 
         return `${openTag}<![CDATA[${decodedContent}]]>${closeTag}`;
       }
