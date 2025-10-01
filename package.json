@@ -34,9 +34,10 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "cross-env": "^7.0.3",
-    "license-checker-rseidelsohn": "^4.4.2"    
+    "license-checker-rseidelsohn": "^4.4.2"
   },
   "overrides": {
     "@bpmn-io/feel-editor": "^1.12.0"
-  }
+  },
+  "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a"
 }
